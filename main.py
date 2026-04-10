@@ -438,10 +438,13 @@ def remove_duplicate_title(content):
     删除 Coze 生成的重复标题（如果存在）
     """
     import re
-    # 匹配常见的标题格式
+
+    # 匹配常见的标题格式（包括带书名号《》的）
     patterns = [
-        r'^🔥\s*[《]?GitHub.*?(?:速览|Daily|Trending).*?\d{4}-\d{2}-\d{4}[》]?\s*\n+',
-        r'^🔥\s*GitHub\s+每日热门项目.*?(?:速览|Daily).*?\d{4}-\d{2}-\d{4}\s*\n+',
+        # 匹配：🔥 《GitHub 每日热门项目速览 - 2024-01-10》
+        r'^[🔥\s]*[《\[]?GitHub.*?\d{4}-\d{2}-\d{4}[》\]]?\s*\n+',
+        # 匹配：🔥 GitHub Daily Trending - 2024-01-10
+        r'^[🔥\s]*GitHub\s+(?:Daily|Trending).*?\d{4}-\d{2}-\d{4}\s*\n+',
     ]
 
     for pattern in patterns:

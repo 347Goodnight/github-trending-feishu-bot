@@ -120,31 +120,53 @@ def fetch_github_trending(top_n=10):
 def build_prompt(date_str, repos):
     """
     构建发送给 Coze 的 Prompt
-    简化版本：只展示项目信息，不翻译中文
+    优化版本：中文简介 + 紧凑格式 + 重点关注
     """
     repos_json = json.dumps(repos, ensure_ascii=False, indent=2)
 
-    prompt = f"""根据 GitHub Trending 数据生成一份项目列表。
+    prompt = f"""你是一名技术编辑，根据 GitHub Trending 数据生成一份中文技术日报。
 
 日期：{date_str}
 
-数据：
+原始数据：
 {repos_json}
 
-输出要求：
+请严格按照以下格式输出：
 
-1. 直接开始项目列表，不要加标题（卡片头部已有标题）
+## 📊 今日趋势
+用 3 条简洁有力的中文总结今日技术热点，像真正的技术编辑写的洞察，不要模板化。例如：
+- AI Agent 与 AI Coding 工具仍是今日榜单主线，相关项目热度明显集中。
+- 文档处理、自动化工程链路、开发效率工具继续保持高关注度。
+- 趋势从"模型能力"逐步转向"工程落地与工作流可复用"。
 
-2. 项目列表格式（每个项目）：
-**排名. 项目名** · 编程语言 <font color='F5A623'>⭐ stars</font> | <font color='8C8C8C'>🍴 forks</font> | <font color='FF0000'>📈 today</font>
-• Description: 英文描述
-• Link: https://github.com/xxx/xxx
+## 🏆 热门项目 TOP {len(repos)}
+每个项目压缩成 3 行，格式如下：
 
-3. 最后加一段简短的今日趋势总结（3-5条）
+**排名. 项目名** · 编程语言
+<font color='FF0000'>📈 今日 +xxx</font> · <font color='F5A623'>⭐ 总stars</font> · <font color='8C8C8C'>🍴 forks</font>
+简介：一句中文提炼（不要英文原文，用你自己的话概括核心功能，15-25字）
+`https://github.com/xxx/xxx`
 
-4. 使用 <font color='颜色代码'>文本</font> 格式添加颜色
+示例：
+**1. microsoft/markitdown** · Python
+<font color='FF0000'>📈 今日 +2,353</font> · <font color='F5A623'>⭐ 97,991</font> · <font color='8C8C8C'>🍴 5,999</font>
+简介：微软开源的文件与 Office 文档转 Markdown 工具。
+`https://github.com/microsoft/markitdown`
 
-直接输出内容，不要代码块。""".strip()
+注意：
+- 简介必须是中文，不要放英文原文
+- 今日新增放最前面，用红色高亮
+- 链接用反引号包裹，单独一行
+- Top 3 可以在排名后加 🥇🥈🥉  emoji
+
+## 🎯 重点关注
+从 Top 10 中选 3 个最值得关注的项目，用中文说明为什么值得关注（每项目 1 句话）。例如：
+- **microsoft/markitdown**：实用性强，适合知识处理与文档转换场景，微软背书生态可靠。
+- **coleam00/Archon**：代表 AI Coding 工程化趋势，强调可重复与可控。
+
+---
+📊 统计口径：GitHub Trending Daily
+直接输出最终内容，不要代码块，不要多余解释。""".strip()
 
     return prompt
 
@@ -317,50 +339,69 @@ def call_coze_generate_report(date_str, repos):
 def build_fallback_report(date_str, repos):
     """
     当 Coze 调用失败时，生成兜底报告
+    优化版本：紧凑格式 + 中文标识
     """
     lines = []
-    lines.append(f"🔥 《GitHub 每日热门项目速览 - {date_str}》")
+
+    # 状态说明
+    lines.append("> ⚠️ **兜底模式**：Coze AI 服务暂时不可用，以下为本地模板生成的项目列表。")
     lines.append("")
-    lines.append("📊 今日趋势")
+
+    lines.append("## 📊 今日趋势")
     lines.append("- 今日热门项目覆盖 AI、开发工具、自动化与基础设施等方向。")
     lines.append("- 开发者效率提升类工具持续受到关注。")
     lines.append("- 开源 AI 应用与工程化能力仍然是热点。")
     lines.append("")
-    lines.append(f"🏆 热门项目 TOP {len(repos)}")
+
+    lines.append(f"## 🏆 热门项目 TOP {len(repos)}")
     lines.append("")
 
     for r in repos:
-        # 标题行：项目名称 · 语言 · 带颜色的统计信息
-        title = f"**{r['rank']}. {r['name']}**"
+        # 排名 emoji（Top 3）
+        rank_emoji = ""
+        if r['rank'] == 1:
+            rank_emoji = "🥇 "
+        elif r['rank'] == 2:
+            rank_emoji = "🥈 "
+        elif r['rank'] == 3:
+            rank_emoji = "🥉 "
+
+        # 第一行：排名 + 项目名 + 语言
+        title = f"**{rank_emoji}{r['rank']}. {r['name']}**"
         if r['language'] and r['language'] != 'Unknown':
             title += f" · {r['language']}"
+        lines.append(title)
 
-        # 添加带颜色的 stars/forks/今日新增
+        # 第二行：今日新增（红色）+ 总stars（黄色）+ forks（灰色）
         info_parts = []
+        if r.get('today_stars'):
+            info_parts.append(f"<font color='FF0000'>📈 {r['today_stars']}</font>")
         if r.get('stars'):
             info_parts.append(f"<font color='F5A623'>⭐ {r['stars']}</font>")
         if r.get('forks'):
             info_parts.append(f"<font color='8C8C8C'>🍴 {r['forks']}</font>")
-        if r.get('today_stars'):
-            info_parts.append(f"<font color='FF0000'>📈 {r['today_stars']}</font>")
 
         if info_parts:
-            title += " " + " | ".join(info_parts)
+            lines.append(" · ".join(info_parts))
 
-        lines.append(title)
-
-        # 描述
+        # 第三行：简介（兜底模式下显示英文原文）
         if r['description']:
-            lines.append(f"• Description: {r['description']}")
+            lines.append(f"简介：{r['description']}")
         else:
-            lines.append(f"• Description: No description")
+            lines.append("简介：暂无描述")
 
-        # 链接
-        lines.append(f"• Link: {r['url']}")
+        # 第四行：链接
+        lines.append(f"`{r['url']}`")
         lines.append("")
 
+    lines.append("## 🎯 重点关注")
+    for r in repos[:3]:
+        lines.append(f"- **{r['name']}**：当前热度较高，值得进一步关注。")
+    lines.append("")
+
     lines.append("---")
-    lines.append("📊 Auto-generated fallback report (Coze AI unavailable)")
+    lines.append("📊 统计口径：GitHub Trending Daily")
+    lines.append("🤖 数据来源：GitHub Trending ｜ 本地模板生成")
 
     return "\n".join(lines).strip()
 

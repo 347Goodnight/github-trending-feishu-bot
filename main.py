@@ -120,6 +120,7 @@ def fetch_github_trending(top_n=10):
 def build_prompt(date_str, repos):
     """
     构建发送给 Coze 的 Prompt
+    要求生成每个项目的中文翻译
     """
     repos_json = json.dumps(repos, ensure_ascii=False, indent=2)
 
@@ -131,7 +132,7 @@ def build_prompt(date_str, repos):
 - rank: 排名
 - name: 仓库名
 - url: 仓库链接
-- description: 原始项目描述
+- description: 原始项目描述（英文）
 - language: 编程语言
 - stars: 总 star 数
 - forks: fork 数
@@ -150,14 +151,13 @@ def build_prompt(date_str, repos):
 - 语言简洁专业
 
 3. 输出"热门项目 TOP {len(repos)}"：
-每个项目包含：
-- 排名
-- 项目名
-- 中文一句话简介
-- 技术分类
-- 编程语言
-- 今日新增 Star
-- 项目链接
+每个项目必须包含以下格式：
+```
+**排名. 项目名** · 编程语言 · 今日新增 Stars
+• 原文：英文描述
+• 中文：中文翻译（一句话概括核心功能）
+• 地址：https://github.com/xxx/xxx
+```
 
 4. 输出"重点关注"：
 从项目中选 3 个最值得关注的项目，并说明原因
@@ -165,10 +165,11 @@ def build_prompt(date_str, repos):
 5. 输出要求：
 - 必须使用中文
 - 必须使用 Markdown
+- 每个项目的格式严格按照：原文 + 中文 + 地址
+- 中文翻译要简洁准确，一句话说明项目核心功能
 - 结构清晰，适合直接发到飞书群
 - 不要输出代码块
 - 不要输出 JSON
-- 若 description 是英文，请翻译并提炼
 - 如果信息不足，不要编造过于具体的事实，可以用相对稳妥的表述
 
 请直接输出最终日报正文。""".strip()
@@ -357,11 +358,25 @@ def build_fallback_report(date_str, repos):
     lines.append("")
 
     for r in repos:
-        lines.append(f"**{r['rank']}. {r['name']}**")
-        lines.append(f"- 简介：{r['description'] or '暂无描述'}")
-        lines.append(f"- 语言：{r['language']}")
-        lines.append(f"- 今日新增：{r['today_stars'] or '暂无数据'}")
-        lines.append(f"- 链接：{r['url']}")
+        # 标题行：项目名称 · 语言 · 今日新增
+        title = f"**{r['rank']}. {r['name']}**"
+        if r['language'] and r['language'] != 'Unknown':
+            title += f" · {r['language']}"
+        if r['today_stars']:
+            title += f" · {r['today_stars']}"
+        lines.append(title)
+
+        # 原文
+        if r['description']:
+            lines.append(f"• **原文**：{r['description']}")
+        else:
+            lines.append(f"• **原文**：暂无描述")
+
+        # 中文（兜底模式下显示提示）
+        lines.append(f"• **中文**：⚠️ Coze AI 服务暂时不可用，无法生成中文翻译")
+
+        # 地址
+        lines.append(f"• **地址**：{r['url']}")
         lines.append("")
 
     lines.append("🎯 重点关注")
@@ -412,25 +427,74 @@ def send_to_feishu_text(text):
     log("Text message sent to Feishu successfully!")
 
 
+def translate_description(desc):
+    """
+    简单的英文描述翻译（基础版）
+    实际使用时建议调用 Coze 或翻译 API 进行更准确的翻译
+    """
+    # 这里可以扩展为调用翻译 API
+    # 暂时返回空字符串，让 Coze 在生成报告时处理翻译
+    return ""
+
+
 def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
     """
     发送卡片消息到飞书（推荐，更美观）
+    样式仿照：原文 + 中文 + 地址 格式
     """
     if not FEISHU_WEBHOOK:
         raise RuntimeError("FEISHU_WEBHOOK is missing.")
 
     headers = {"Content-Type": "application/json"}
 
-    # 构建项目列表元素
+    # 构建项目列表元素 - 仿照第二张图片样式
     repo_elements = []
     for i, r in enumerate(repos[:5], 1):  # 只展示前5个
+        # 项目标题行：序号 + 项目名称 + 语言 + Stars
+        title_line = f"**{i}. {r['name']}**"
+        if r['language'] and r['language'] != 'Unknown':
+            title_line += f" · {r['language']}"
+        if r['today_stars']:
+            title_line += f" · {r['today_stars']}"
+
         repo_elements.append({
             "tag": "div",
             "text": {
                 "tag": "lark_md",
-                "content": f"**{i}. {r['name']}**\n{r['description'] or '暂无描述'} | {r['language']} | {r['today_stars'] or 'N/A'}"
+                "content": title_line
             }
         })
+
+        # 原文（英文简介）
+        if r['description']:
+            repo_elements.append({
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"• **原文**：{r['description']}"
+                }
+            })
+
+        # 中文（这里先显示占位，实际内容由 Coze 在 report_content 中生成详细翻译）
+        # 或者可以调用翻译 API
+        repo_elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"• **中文**：待 Coze AI 生成中文简介"
+            }
+        })
+
+        # 地址
+        repo_elements.append({
+            "tag": "div",
+            "text": {
+                "tag": "lark_md",
+                "content": f"• **地址**：[{r['url']}]({r['url']})"
+            }
+        })
+
+        # 项目间分隔
         repo_elements.append({"tag": "hr"})
 
     # 移除最后一个分割线
@@ -456,7 +520,7 @@ def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": report_content[:2000] if len(report_content) > 2000 else report_content
+                        "content": report_content[:1500] if len(report_content) > 1500 else report_content
                     }
                 },
                 {
@@ -466,7 +530,7 @@ def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": "**📊 热门项目速览**"
+                        "content": "**📊 热门项目详情**"
                     }
                 },
                 *repo_elements,

@@ -120,66 +120,32 @@ def fetch_github_trending(top_n=10):
 def build_prompt(date_str, repos):
     """
     构建发送给 Coze 的 Prompt
-    要求生成每个项目的中文翻译，带颜色和符号
+    简化版本：只展示项目信息，不翻译中文
     """
     repos_json = json.dumps(repos, ensure_ascii=False, indent=2)
 
-    prompt = f"""你是一名技术内容编辑，现在请根据输入的 GitHub Trending 仓库数据，生成一份中文技术日报，准备发布到飞书群。
+    prompt = f"""根据 GitHub Trending 数据生成一份项目列表。
 
 日期：{date_str}
 
-输入字段说明：
-- rank: 排名
-- name: 仓库名
-- url: 仓库链接
-- description: 原始项目描述（英文）
-- language: 编程语言
-- stars: 总 star 数
-- forks: fork 数
-- today_stars: 今日新增 star 文本
-
-原始数据如下：
+数据：
 {repos_json}
 
-请严格按以下要求输出：
+输出要求：
 
 1. 标题：
-🔥 《GitHub 每日热门项目速览 - {date_str}》
+🔥 GitHub Daily Trending - {date_str}
 
-2. 输出"📊 今日趋势"：
-- 用 3~5 条总结今天的技术热点方向
-- 语言简洁专业
-- 每条前面加相关 emoji
+2. 项目列表（每个项目格式）：
+**排名. 项目名** · 编程语言 <font color='F5A623'>⭐ stars</font> | <font color='8C8C8C'>🍴 forks</font> | <font color='FF0000'>📈 today</font>
+• Description: 英文描述
+• Link: https://github.com/xxx/xxx
 
-3. 输出"🏆 今日热门项目 TOP {len(repos)}"：
-每个项目必须包含以下格式（注意使用飞书支持的 HTML 颜色标签）：
+3. 最后加一段简短的今日趋势总结（3-5条）
 
-**排名. 项目名** · 编程语言 <font color='F5A623'>⭐ 总stars数</font> | <font color='8C8C8C'>🍴 forks数</font> | <font color='FF0000'>📈 今日新增stars</font>
-• **原文**：英文描述
-• **中文**：中文翻译（一句话概括核心功能）
-• **地址**：https://github.com/xxx/xxx
+4. 使用 <font color='颜色代码'>文本</font> 格式添加颜色
 
-示例：
-**1. microsoft/markdown-it** · JavaScript <font color='F5A623'>⭐ 42,355</font> | <font color='8C8C8C'>🍴 5,401</font> | <font color='FF0000'>📈 2,353 stars today</font>
-• **原文**：A markdown parser built for speed and security
-• **中文**：一个为速度和安全性而构建的 Markdown 解析器
-• **地址**：https://github.com/microsoft/markdown-it
-
-4. 输出"🎯 重点关注"：
-从项目中选 3 个最值得关注的项目，并说明原因
-
-5. 输出要求：
-- 必须使用中文
-- 标题和章节使用 emoji 装饰
-- 每个项目的格式严格按照：标题(带颜色stars/forks/今日新增) + 原文 + 中文 + 地址
-- 中文翻译要简洁准确，一句话说明项目核心功能
-- 使用 <font color='颜色代码'>文本</font> 格式添加颜色（飞书支持）
-- 结构清晰，适合直接发到飞书群
-- 不要输出代码块
-- 不要输出 JSON
-- 如果信息不足，不要编造过于具体的事实，可以用相对稳妥的表述
-
-请直接输出最终日报正文。""".strip()
+直接输出内容，不要代码块。""".strip()
 
     return prompt
 
@@ -384,26 +350,18 @@ def build_fallback_report(date_str, repos):
 
         lines.append(title)
 
-        # 原文
+        # 描述
         if r['description']:
-            lines.append(f"• **原文**：{r['description']}")
+            lines.append(f"• Description: {r['description']}")
         else:
-            lines.append(f"• **原文**：暂无描述")
+            lines.append(f"• Description: No description")
 
-        # 中文（兜底模式下显示提示）
-        lines.append(f"• **中文**：⚠️ Coze AI 服务暂时不可用，无法生成中文翻译")
-
-        # 地址
-        lines.append(f"• **地址**：{r['url']}")
+        # 链接
+        lines.append(f"• Link: {r['url']}")
         lines.append("")
 
-    lines.append("🎯 重点关注")
-    for r in repos[:3]:
-        lines.append(f"- **{r['name']}**：当前热度较高，值得进一步关注其应用场景与社区增长。")
-
-    lines.append("")
     lines.append("---")
-    lines.append("⚠️ 注：Coze AI 服务暂时不可用，以上为自动生成的兜底报告。")
+    lines.append("📊 Auto-generated fallback report (Coze AI unavailable)")
 
     return "\n".join(lines).strip()
 
@@ -505,7 +463,7 @@ def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": report_content[:3000] if len(report_content) > 3000 else report_content
+                        "content": report_content[:8000] if len(report_content) > 8000 else report_content
                     }
                 },
                 {

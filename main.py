@@ -120,7 +120,7 @@ def fetch_github_trending(top_n=10):
 def build_prompt(date_str, repos):
     """
     构建发送给 Coze 的 Prompt
-    要求生成每个项目的中文翻译
+    要求生成每个项目的中文翻译，带颜色和符号
     """
     repos_json = json.dumps(repos, ensure_ascii=False, indent=2)
 
@@ -144,29 +144,36 @@ def build_prompt(date_str, repos):
 请严格按以下要求输出：
 
 1. 标题：
-《GitHub 每日热门项目速览 - {date_str}》
+🔥 《GitHub 每日热门项目速览 - {date_str}》
 
-2. 输出"今日趋势"：
+2. 输出"📊 今日趋势"：
 - 用 3~5 条总结今天的技术热点方向
 - 语言简洁专业
+- 每条前面加相关 emoji
 
-3. 输出"热门项目 TOP {len(repos)}"：
-每个项目必须包含以下格式：
-```
-**排名. 项目名** · 编程语言 · 今日新增 Stars
-• 原文：英文描述
-• 中文：中文翻译（一句话概括核心功能）
-• 地址：https://github.com/xxx/xxx
-```
+3. 输出"🏆 今日热门项目 TOP {len(repos)}"：
+每个项目必须包含以下格式（注意使用飞书支持的 HTML 颜色标签）：
 
-4. 输出"重点关注"：
+**排名. 项目名** · 编程语言 <font color='F5A623'>⭐ 总stars数</font> | <font color='8C8C8C'>🍴 forks数</font> | <font color='FF0000'>📈 今日新增stars</font>
+• **原文**：英文描述
+• **中文**：中文翻译（一句话概括核心功能）
+• **地址**：https://github.com/xxx/xxx
+
+示例：
+**1. microsoft/markdown-it** · JavaScript <font color='F5A623'>⭐ 42,355</font> | <font color='8C8C8C'>🍴 5,401</font> | <font color='FF0000'>📈 2,353 stars today</font>
+• **原文**：A markdown parser built for speed and security
+• **中文**：一个为速度和安全性而构建的 Markdown 解析器
+• **地址**：https://github.com/microsoft/markdown-it
+
+4. 输出"🎯 重点关注"：
 从项目中选 3 个最值得关注的项目，并说明原因
 
 5. 输出要求：
 - 必须使用中文
-- 必须使用 Markdown
-- 每个项目的格式严格按照：原文 + 中文 + 地址
+- 标题和章节使用 emoji 装饰
+- 每个项目的格式严格按照：标题(带颜色stars/forks/今日新增) + 原文 + 中文 + 地址
 - 中文翻译要简洁准确，一句话说明项目核心功能
+- 使用 <font color='颜色代码'>文本</font> 格式添加颜色（飞书支持）
 - 结构清晰，适合直接发到飞书群
 - 不要输出代码块
 - 不要输出 JSON
@@ -358,12 +365,23 @@ def build_fallback_report(date_str, repos):
     lines.append("")
 
     for r in repos:
-        # 标题行：项目名称 · 语言 · 今日新增
+        # 标题行：项目名称 · 语言 · 带颜色的统计信息
         title = f"**{r['rank']}. {r['name']}**"
         if r['language'] and r['language'] != 'Unknown':
             title += f" · {r['language']}"
-        if r['today_stars']:
-            title += f" · {r['today_stars']}"
+
+        # 添加带颜色的 stars/forks/今日新增
+        info_parts = []
+        if r.get('stars'):
+            info_parts.append(f"<font color='F5A623'>⭐ {r['stars']}</font>")
+        if r.get('forks'):
+            info_parts.append(f"<font color='8C8C8C'>🍴 {r['forks']}</font>")
+        if r.get('today_stars'):
+            info_parts.append(f"<font color='FF0000'>📈 {r['today_stars']}</font>")
+
+        if info_parts:
+            title += " " + " | ".join(info_parts)
+
         lines.append(title)
 
         # 原文
@@ -437,71 +455,38 @@ def translate_description(desc):
     return ""
 
 
+def format_repo_info(r):
+    """
+    格式化项目信息，带颜色和符号
+    """
+    info_parts = []
+
+    # 总 Stars - 黄色
+    if r.get('stars'):
+        info_parts.append(f"<font color='F5A623'>⭐ {r['stars']}</font>")
+
+    # Forks - 灰色
+    if r.get('forks'):
+        info_parts.append(f"<font color='8C8C8C'>🍴 {r['forks']}</font>")
+
+    # 今日新增 - 红色高亮
+    if r.get('today_stars'):
+        info_parts.append(f"<font color='FF0000'>📈 {r['today_stars']}</font>")
+
+    return " | ".join(info_parts) if info_parts else ""
+
+
 def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
     """
     发送卡片消息到飞书（推荐，更美观）
-    样式仿照：原文 + 中文 + 地址 格式
+    只显示 Coze 生成的内容，避免重复
     """
     if not FEISHU_WEBHOOK:
         raise RuntimeError("FEISHU_WEBHOOK is missing.")
 
     headers = {"Content-Type": "application/json"}
 
-    # 构建项目列表元素 - 仿照第二张图片样式
-    repo_elements = []
-    for i, r in enumerate(repos[:5], 1):  # 只展示前5个
-        # 项目标题行：序号 + 项目名称 + 语言 + Stars
-        title_line = f"**{i}. {r['name']}**"
-        if r['language'] and r['language'] != 'Unknown':
-            title_line += f" · {r['language']}"
-        if r['today_stars']:
-            title_line += f" · {r['today_stars']}"
-
-        repo_elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": title_line
-            }
-        })
-
-        # 原文（英文简介）
-        if r['description']:
-            repo_elements.append({
-                "tag": "div",
-                "text": {
-                    "tag": "lark_md",
-                    "content": f"• **原文**：{r['description']}"
-                }
-            })
-
-        # 中文（这里先显示占位，实际内容由 Coze 在 report_content 中生成详细翻译）
-        # 或者可以调用翻译 API
-        repo_elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": f"• **中文**：待 Coze AI 生成中文简介"
-            }
-        })
-
-        # 地址
-        repo_elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": f"• **地址**：[{r['url']}]({r['url']})"
-            }
-        })
-
-        # 项目间分隔
-        repo_elements.append({"tag": "hr"})
-
-    # 移除最后一个分割线
-    if repo_elements:
-        repo_elements.pop()
-
-    # 构建卡片
+    # 构建卡片 - 直接显示 Coze 生成的完整内容
     payload = {
         "msg_type": "interactive",
         "card": {
@@ -520,20 +505,9 @@ def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": report_content[:1500] if len(report_content) > 1500 else report_content
+                        "content": report_content[:3000] if len(report_content) > 3000 else report_content
                     }
                 },
-                {
-                    "tag": "hr"
-                },
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": "**📊 热门项目详情**"
-                    }
-                },
-                *repo_elements,
                 {
                     "tag": "hr"
                 },

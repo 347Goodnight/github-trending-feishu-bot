@@ -436,21 +436,24 @@ def format_repo_info(r):
 def remove_duplicate_title(content):
     """
     删除 Coze 生成的重复标题（如果存在）
+    直接删除包含 GitHub 和日期的第一行
     """
-    import re
+    lines = content.split('\n')
 
-    # 匹配常见的标题格式（包括带书名号《》的）
-    patterns = [
-        # 匹配：🔥 《GitHub 每日热门项目速览 - 2024-01-10》
-        r'^[🔥\s]*[《\[]?GitHub.*?\d{4}-\d{2}-\d{4}[》\]]?\s*\n+',
-        # 匹配：🔥 GitHub Daily Trending - 2024-01-10
-        r'^[🔥\s]*GitHub\s+(?:Daily|Trending).*?\d{4}-\d{2}-\d{4}\s*\n+',
-    ]
+    # 找到第一个非空行
+    first_content_line = 0
+    for i, line in enumerate(lines):
+        if line.strip():
+            first_content_line = i
+            break
 
-    for pattern in patterns:
-        content = re.sub(pattern, '', content, flags=re.IGNORECASE | re.MULTILINE)
+    # 检查第一行是否是标题（包含 GitHub 和日期）
+    first_line = lines[first_content_line] if first_content_line < len(lines) else ""
+    if 'GitHub' in first_line and any(c.isdigit() for c in first_line):
+        # 删除这一行
+        lines.pop(first_content_line)
 
-    return content.strip()
+    return '\n'.join(lines).strip()
 
 
 def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):

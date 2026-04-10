@@ -433,6 +433,23 @@ def format_repo_info(r):
     return " | ".join(info_parts) if info_parts else ""
 
 
+def remove_duplicate_title(content):
+    """
+    删除 Coze 生成的重复标题（如果存在）
+    """
+    import re
+    # 匹配常见的标题格式
+    patterns = [
+        r'^🔥\s*[《]?GitHub.*?(?:速览|Daily|Trending).*?\d{4}-\d{2}-\d{4}[》]?\s*\n+',
+        r'^🔥\s*GitHub\s+每日热门项目.*?(?:速览|Daily).*?\d{4}-\d{2}-\d{4}\s*\n+',
+    ]
+
+    for pattern in patterns:
+        content = re.sub(pattern, '', content, flags=re.IGNORECASE | re.MULTILINE)
+
+    return content.strip()
+
+
 def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
     """
     发送卡片消息到飞书（推荐，更美观）
@@ -442,6 +459,9 @@ def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
         raise RuntimeError("FEISHU_WEBHOOK is missing.")
 
     headers = {"Content-Type": "application/json"}
+
+    # 删除可能的重复标题
+    cleaned_content = remove_duplicate_title(report_content)
 
     # 构建卡片 - 直接显示 Coze 生成的完整内容
     payload = {
@@ -462,7 +482,7 @@ def send_to_feishu_card(date_str, repos, report_content, is_fallback=False):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": report_content[:8000] if len(report_content) > 8000 else report_content
+                        "content": cleaned_content[:8000] if len(cleaned_content) > 8000 else cleaned_content
                     }
                 },
                 {

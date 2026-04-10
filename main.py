@@ -133,10 +133,9 @@ def build_prompt(date_str, repos):
 
 输出要求：
 
-1. 标题：
-🔥 GitHub Daily Trending - {date_str}
+1. 直接开始项目列表，不要加标题（卡片头部已有标题）
 
-2. 项目列表（每个项目格式）：
+2. 项目列表格式（每个项目）：
 **排名. 项目名** · 编程语言 <font color='F5A623'>⭐ stars</font> | <font color='8C8C8C'>🍴 forks</font> | <font color='FF0000'>📈 today</font>
 • Description: 英文描述
 • Link: https://github.com/xxx/xxx

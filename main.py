@@ -173,21 +173,16 @@ def build_prompt(date_str, repos):
 
 def call_coze_chat_api(date_str, repos):
     """
-    调用 Coze Chat API (v3/chat)
-    适用于：Coze Bot 对话模式
+    调用 Coze Chat API
     """
     if not COZE_API_TOKEN or not COZE_BOT_ID:
         raise RuntimeError("COZE_API_TOKEN or COZE_BOT_ID is missing.")
-
     prompt = build_prompt(date_str, repos)
-
-    # Coze Chat API v3
     url = "https://api.coze.cn/v3/chat"
     headers = {
         "Authorization": f"Bearer {COZE_API_TOKEN}",
         "Content-Type": "application/json"
     }
-
     payload = {
         "bot_id": COZE_BOT_ID,
         "user_id": "github-trending-bot",
@@ -200,7 +195,6 @@ def call_coze_chat_api(date_str, repos):
         ],
         "stream": False
     }
-
     log("Calling Coze Chat API (v3)...")
     resp = requests.post(
         url,
@@ -209,43 +203,63 @@ def call_coze_chat_api(date_str, repos):
         proxies=PROXIES if PROXIES else None,
         timeout=120
     )
-
+    log(f"Coze Chat status: {resp.status_code}")
+    log(f"Coze Chat raw body: {resp.text[:1500]}")
     if resp.status_code != 200:
         raise RuntimeError(f"Coze API error: {resp.status_code}, {resp.text}")
-
     data = resp.json()
-    log(f"Coze response: {json.dumps(data, ensure_ascii=False)[:500]}...")
-
-    # 解析响应
-    report = None
-
     if isinstance(data, dict):
-        # v3 API 返回结构
-        if "data" in data:
-            chat_data = data["data"]
-            if isinstance(chat_data, dict):
-                # 尝试获取最后一条 assistant 消息
-                if "messages" in chat_data and isinstance(chat_data["messages"], list):
-                    for msg in reversed(chat_data["messages"]):
-                        if msg.get("role") == "assistant":
-                            report = msg.get("content", "")
+        api_code = data.get("code")
+        if api_code not in (None, 0, "0"):
+            raise RuntimeError(
+                f"Coze business error: code={api_code}, "
+                f"msg={data.get('msg') or data.get('message')}"
+            )
+    report = None
+    if isinstance(data, dict):
+        # 结构1：data.messages
+        chat_data = data.get("data")
+        if isinstance(chat_data, dict):
+            messages = chat_data.get("messages")
+            if isinstance(messages, list):
+                for msg in reversed(messages):
+                    if msg.get("role") == "assistant":
+                        content = msg.get("content")
+                        if isinstance(content, str) and content.strip():
+                            report = content.strip()
                             break
-
-        # 兼容旧版结构
-        if not report and "messages" in data and isinstance(data["messages"], list):
-            for msg in reversed(data["messages"]):
-                content = msg.get("content")
-                if content:
-                    report = content
-                    break
-
-        if not report and "content" in data:
-            report = data["content"]
-
+                        elif content:
+                            report = json.dumps(content, ensure_ascii=False)
+                            break
+            # 结构2：data.content
+            if not report:
+                content = chat_data.get("content")
+                if isinstance(content, str) and content.strip():
+                    report = content.strip()
+                elif content:
+                    report = json.dumps(content, ensure_ascii=False)
+        # 结构3：顶层 messages
+        if not report:
+            messages = data.get("messages")
+            if isinstance(messages, list):
+                for msg in reversed(messages):
+                    content = msg.get("content")
+                    if isinstance(content, str) and content.strip():
+                        report = content.strip()
+                        break
+                    elif content:
+                        report = json.dumps(content, ensure_ascii=False)
+                        break
+        # 结构4：顶层 content
+        if not report:
+            content = data.get("content")
+            if isinstance(content, str) and content.strip():
+                report = content.strip()
+            elif content:
+                report = json.dumps(content, ensure_ascii=False)
     if not report:
         raise RuntimeError(f"Unable to parse Coze response: {resp.text[:500]}")
-
-    return report.strip()
+    return report
 
 
 def call_coze_workflow_api(date_str, repos):
@@ -311,29 +325,11 @@ def call_coze_workflow_api(date_str, repos):
 
 
 def call_coze_generate_report(date_str, repos):
-    """
-    调用 Coze 生成报告
-    优先尝试 Chat API，如果配置了 Workflow ID 则尝试 Workflow API
-    """
-    errors = []
-
-    # 如果配置了 Workflow ID，优先使用 Workflow API
-    if COZE_WORKFLOW_ID:
-        try:
-            return call_coze_workflow_api(date_str, repos)
-        except Exception as e:
-            errors.append(f"Workflow API failed: {e}")
-            log(f"Workflow API failed, trying Chat API...")
-
-    # 尝试 Chat API
-    if COZE_BOT_ID:
-        try:
-            return call_coze_chat_api(date_str, repos)
-        except Exception as e:
-            errors.append(f"Chat API failed: {e}")
-
-    # 都失败了
-    raise RuntimeError(f"All Coze API attempts failed: {'; '.join(errors)}")
+    if not COZE_API_TOKEN:
+        raise RuntimeError("COZE_API_TOKEN is missing.")
+    if not COZE_BOT_ID:
+        raise RuntimeError("COZE_BOT_ID is missing.")
+    return call_coze_chat_api(date_str, repos)
 
 
 def build_fallback_report(date_str, repos):
@@ -596,6 +592,12 @@ def main():
         log("Starting GitHub Trending Bot...")
         log("=" * 50)
 
+        # 打印环境变量是否读取成功
+        log(f"FEISHU_WEBHOOK configured: {'yes' if FEISHU_WEBHOOK else 'no'}")
+        log(f"COZE_API_TOKEN configured: {'yes' if COZE_API_TOKEN else 'no'}")
+        log(f"COZE_BOT_ID configured: {'yes' if COZE_BOT_ID else 'no'}")
+        log(f"COZE_WORKFLOW_ID configured: {'yes' if COZE_WORKFLOW_ID else 'no'}")
+
         # 1. 获取今日日期
         date_str = get_today_str()
         log(f"Today: {date_str}")
@@ -609,7 +611,9 @@ def main():
             report = call_coze_generate_report(date_str, repos)
             log("Coze report generated successfully.")
         except Exception as e:
+            import traceback
             log(f"Coze failed, using fallback report. Error: {e}")
+            log(traceback.format_exc())
             report = build_fallback_report(date_str, repos)
             is_fallback = True
 

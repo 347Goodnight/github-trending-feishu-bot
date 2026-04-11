@@ -232,17 +232,17 @@ def call_coze_chat_api(date_str, repos):
     for i in range(max_retries):
         time.sleep(retry_delay)
         
-        # 查询对话状态
+        # 查询对话状态 - 使用 POST 请求
         retrieve_url = f"https://api.coze.cn/v3/chat/retrieve"
-        params = {
+        payload = {
             "chat_id": chat_id,
             "conversation_id": conversation_id
         }
         
-        resp = requests.get(
+        resp = requests.post(
             retrieve_url,
             headers=headers,
-            params=params,
+            json=payload,
             proxies=PROXIES if PROXIES else None,
             timeout=30
         )
@@ -263,12 +263,12 @@ def call_coze_chat_api(date_str, repos):
         
         if status == "completed":
             log("Chat completed! Fetching messages...")
-            # 获取消息列表
+            # 获取消息列表 - 使用 POST 请求
             message_list_url = "https://api.coze.cn/v3/chat/message/list"
-            resp = requests.get(
+            resp = requests.post(
                 message_list_url,
                 headers=headers,
-                params=params,
+                json=payload,
                 proxies=PROXIES if PROXIES else None,
                 timeout=30
             )

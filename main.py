@@ -226,10 +226,13 @@ def call_coze_chat_api(date_str, repos):
     
     # Step 2: 轮询获取结果
     log("Step 2: Polling for chat result...")
-    max_retries = 60  # 增加轮询次数
-    retry_delay = 3   # 增加间隔时间
+    max_retries = 30  # 最多轮询30次
+    initial_delay = 1  # 初始间隔1秒
+    max_delay = 5      # 最大间隔5秒
     
     for i in range(max_retries):
+        # 使用指数退避：1, 2, 3, 4, 5, 5, 5... 秒
+        retry_delay = min(initial_delay + i * 0.5, max_delay)
         time.sleep(retry_delay)
         
         # 查询对话状态 - 使用 GET 请求，参数放在 URL 中

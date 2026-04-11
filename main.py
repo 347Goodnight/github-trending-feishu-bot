@@ -177,6 +177,11 @@ def call_coze_chat_api(date_str, repos):
     """
     if not COZE_API_TOKEN or not COZE_BOT_ID:
         raise RuntimeError("COZE_API_TOKEN or COZE_BOT_ID is missing.")
+    
+    # 打印 token 和 bot_id 的前几个字符用于调试（不要打印完整的敏感信息）
+    log(f"COZE_API_TOKEN prefix: {COZE_API_TOKEN[:10]}... (length: {len(COZE_API_TOKEN)})")
+    log(f"COZE_BOT_ID: {COZE_BOT_ID}")
+    
     prompt = build_prompt(date_str, repos)
     url = "https://api.coze.cn/v3/chat"
     headers = {
@@ -196,6 +201,10 @@ def call_coze_chat_api(date_str, repos):
         "stream": False
     }
     log("Calling Coze Chat API (v3)...")
+    log(f"Request URL: {url}")
+    log(f"Request headers: {json.dumps({k: v[:20] + '...' if k == 'Authorization' else v for k, v in headers.items()})}")
+    log(f"Request payload bot_id: {payload.get('bot_id')}")
+    
     resp = requests.post(
         url,
         headers=headers,
@@ -204,7 +213,7 @@ def call_coze_chat_api(date_str, repos):
         timeout=120
     )
     log(f"Coze Chat status: {resp.status_code}")
-    log(f"Coze Chat raw body: {resp.text[:1500]}")
+    log(f"Coze Chat raw body: {resp.text[:2000]}")
     if resp.status_code != 200:
         raise RuntimeError(f"Coze API error: {resp.status_code}, {resp.text}")
     data = resp.json()

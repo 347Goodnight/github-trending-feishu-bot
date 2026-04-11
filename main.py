@@ -226,8 +226,8 @@ def call_coze_chat_api(date_str, repos):
     
     # Step 2: 轮询获取结果
     log("Step 2: Polling for chat result...")
-    max_retries = 30
-    retry_delay = 2
+    max_retries = 60  # 增加轮询次数
+    retry_delay = 3   # 增加间隔时间
     
     for i in range(max_retries):
         time.sleep(retry_delay)
@@ -253,7 +253,7 @@ def call_coze_chat_api(date_str, repos):
         
         data = resp.json()
         if data.get("code") != 0:
-            log(f"Poll {i+1}/{max_retries}: Business error {data.get('code')}")
+            log(f"Poll {i+1}/{max_retries}: Business error {data.get('code')}, msg={data.get('msg')}")
             continue
         
         chat_data = data.get("data", {})
@@ -262,6 +262,7 @@ def call_coze_chat_api(date_str, repos):
         log(f"Poll {i+1}/{max_retries}: status={status}")
         
         if status == "completed":
+            log("Chat completed! Fetching messages...")
             # 获取消息列表
             message_list_url = "https://api.coze.cn/v3/chat/message/list"
             resp = requests.get(
@@ -272,18 +273,31 @@ def call_coze_chat_api(date_str, repos):
                 timeout=30
             )
             
+            log(f"Message list API status: {resp.status_code}")
             if resp.status_code == 200:
                 data = resp.json()
+                log(f"Message list response code: {data.get('code')}")
                 if data.get("code") == 0:
                     messages = data.get("data", [])
+                    log(f"Got {len(messages)} messages")
+                    for idx, msg in enumerate(messages):
+                        log(f"Message {idx}: role={msg.get('role')}, content_type={type(msg.get('content'))}")
+                    
                     for msg in reversed(messages):
                         if msg.get("role") == "assistant":
                             content = msg.get("content")
+                            log(f"Found assistant message, content type: {type(content)}, length: {len(content) if isinstance(content, str) else 'N/A'}")
                             if isinstance(content, str) and content.strip():
                                 log(f"Got response from assistant, length={len(content)}")
                                 return content.strip()
                             elif content:
                                 return json.dumps(content, ensure_ascii=False)
+                    
+                    log("No assistant message found in messages")
+                else:
+                    log(f"Message list API error: {data.get('code')}, {data.get('msg')}")
+            else:
+                log(f"Message list API HTTP error: {resp.status_code}, {resp.text[:500]}")
             
             raise RuntimeError("Chat completed but no assistant message found")
         

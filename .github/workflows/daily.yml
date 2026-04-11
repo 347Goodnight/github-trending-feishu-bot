@@ -29,6 +29,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Diagnose Coze API (Debug)
+      env:
+        FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        COZE_API_TOKEN: ${{ secrets.COZE_API_TOKEN }}
+        COZE_BOT_ID: ${{ secrets.COZE_BOT_ID }}
+      run: python diagnose_coze.py
+
     - name: Run bot
       env:
         FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""
-完整的 Coze API 诊断工具
-"""
 import os
 import json
+import time
 import requests
 from datetime import datetime
+
+DIAGNOSE_VERSION = "2026-04-11-diagnose-fix-03"
 
 COZE_API_TOKEN = os.getenv("COZE_API_TOKEN", "").strip()
 COZE_BOT_ID = os.getenv("COZE_BOT_ID", "").strip()
@@ -13,6 +13,7 @@ FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "").strip()
 
 print("=" * 70)
 print("🔍 Coze API 完整诊断报告")
+print(f"版本: {DIAGNOSE_VERSION}")
 print(f"⏰ 诊断时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 print("=" * 70)
 
@@ -35,103 +36,75 @@ for name, value, is_sensitive in configs:
         print(f"  ❌ {name}: 未设置")
     print(f"     长度: {len(value)} 字符")
 
-print("\n【2】Token 格式检查")
-print("-" * 70)
-if COZE_API_TOKEN:
-    if COZE_API_TOKEN.startswith("pat_"):
-        print("  ✅ Token 格式: Personal Access Token (pat_xxx)")
-    elif COZE_API_TOKEN.startswith("bearer_"):
-        print("  ⚠️  Token 格式: Bearer Token (bearer_xxx)")
-    else:
-        print(f"  ⚠️  Token 格式: 未知格式 (前缀: {COZE_API_TOKEN[:10]}...)")
-    print(f"  Token 长度: {len(COZE_API_TOKEN)} 字符")
-else:
-    print("  ❌ 未提供 Token")
-
-print("\n【3】Bot ID 检查")
-print("-" * 70)
-if COZE_BOT_ID:
-    print(f"  Bot ID: {COZE_BOT_ID}")
-    print(f"  Bot ID 长度: {len(COZE_BOT_ID)} 字符")
-    if COZE_BOT_ID.isdigit():
-        print("  ✅ Bot ID 为纯数字")
-    elif COZE_BOT_ID.replace("-", "").isalnum():
-        print("  ✅ Bot ID 格式正常 (可能为 UUID)")
-else:
-    print("  ❌ 未提供 Bot ID")
-
-print("\n【4】测试 Coze Chat API v3")
-print("-" * 70)
-
 if not COZE_API_TOKEN or not COZE_BOT_ID:
-    print("  ❌ 缺少必要的配置信息")
-else:
-    url = "https://api.coze.cn/v3/chat"
-    headers = {
-        "Authorization": f"Bearer {COZE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "bot_id": COZE_BOT_ID,
-        "user_id": "diagnostic-tool",
-        "additional_messages": [
-            {
-                "role": "user",
-                "content": "你好",
-                "content_type": "text"
-            }
-        ],
-        "stream": False
-    }
+    print("\n❌ 缺少 COZE_API_TOKEN 或 COZE_BOT_ID，无法继续诊断")
+    raise SystemExit(1)
 
-    print(f"  📡 请求信息:")
-    print(f"     URL: {url}")
-    print(f"     Method: POST")
-    print(f"     Headers: Authorization=Bearer {COZE_API_TOKEN[:15]}...")
+headers = {
+    "Authorization": f"Bearer {COZE_API_TOKEN}",
+    "Content-Type": "application/json"
+}
 
-    try:
-        print(f"\n  ⏳ 正在发送请求...")
-        resp = requests.post(url, headers=headers, json=payload, timeout=30)
-        
-        print(f"\n  📥 响应信息:")
-        print(f"     HTTP 状态码: {resp.status_code}")
-        print(f"     响应头: {dict(resp.headers)}")
-        print(f"\n  📄 响应体 (原始):")
-        print(f"     {resp.text[:500]}")
-        
-        try:
-            data = resp.json()
-            print(f"\n  📄 响应体 (格式化):")
-            print(f"     {json.dumps(data, ensure_ascii=False, indent=2)[:800]}")
-        except:
-            pass
-        
-        if resp.status_code == 200:
-            print("\n  ✅ HTTP 请求成功!")
-            data = resp.json()
-            if data.get("code") == 0:
-                print("  ✅ 业务逻辑成功!")
-            else:
-                print(f"  ❌ 业务逻辑失败: code={data.get('code')}, msg={data.get('msg')}")
-        else:
-            print(f"\n  ❌ HTTP 请求失败!")
-            if resp.status_code == 401:
-                print("     → 认证失败，请检查 Token 是否正确")
-            elif resp.status_code == 403:
-                print("     → 权限不足，请检查 Token 权限")
-            elif resp.status_code == 404:
-                print("     → Bot 未找到，请检查 Bot ID")
-            elif resp.status_code == 410:
-                print("     → 资源不可用，请检查 Bot 是否已发布")
-            else:
-                print(f"     → 未知错误")
-                
-    except requests.exceptions.Timeout:
-        print("\n  ❌ 请求超时")
-    except requests.exceptions.ConnectionError as e:
-        print(f"\n  ❌ 连接失败: {e}")
-    except Exception as e:
-        print(f"\n  ❌ 发生异常: {e}")
+print("\n【2】测试 Coze Chat API create -> retrieve 全链路")
+print("-" * 70)
+
+create_payload = {
+    "bot_id": COZE_BOT_ID,
+    "user_id": "diagnostic-tool",
+    "additional_messages": [
+        {
+            "role": "user",
+            "content": "请回复：你好",
+            "content_type": "text"
+        }
+    ],
+    "stream": False
+}
+
+print("  Step 1: POST /v3/chat")
+resp = requests.post(
+    "https://api.coze.cn/v3/chat",
+    headers=headers,
+    json=create_payload,
+    timeout=30
+)
+print(f"  CREATE HTTP 状态码: {resp.status_code}")
+print(f"  CREATE 响应体: {resp.text[:1000]}")
+
+if resp.status_code != 200:
+    print("  ❌ create 请求失败")
+    raise SystemExit(1)
+
+data = resp.json()
+if data.get("code") != 0:
+    print(f"  ❌ create 业务失败: code={data.get('code')}, msg={data.get('msg')}")
+    raise SystemExit(1)
+
+chat_data = data.get("data", {})
+chat_obj_id = chat_data.get("id")
+conversation_id = chat_data.get("conversation_id")
+
+print(f"  object_id: {chat_obj_id}")
+print(f"  conversation_id: {conversation_id}")
+print(f"  status: {chat_data.get('status')}")
+
+print("\n  Step 2: 等待 2 秒")
+time.sleep(2)
+
+print("\n  Step 3: POST /v3/chat/retrieve")
+retrieve_payload = {
+    "chat_id": chat_obj_id,
+    "conversation_id": conversation_id
+}
+resp2 = requests.post(
+    "https://api.coze.cn/v3/chat/retrieve",
+    headers=headers,
+    json=retrieve_payload,
+    timeout=30
+)
+print(f"  RETRIEVE HTTP 状态码: {resp2.status_code}")
+print(f"  RETRIEVE 请求体: {json.dumps(retrieve_payload, ensure_ascii=False)}")
+print(f"  RETRIEVE 响应体: {resp2.text[:1000]}")
 
 print("\n" + "=" * 70)
 print("诊断完成")

@@ -236,9 +236,26 @@ def call_coze_chat_api(date_str, repos):
         retry_delay = min(initial_delay + i * 0.5, max_delay)
         time.sleep(retry_delay)
         
-        # 查询对话状态
-        retrieve_url = f"https://api.coze.cn/v3/chat/retrieve?chat_id={chat_id}&conversation_id={conversation_id}"
-        resp = requests.get(retrieve_url, headers=headers, proxies=PROXIES if PROXIES else None, timeout=30)
+        # 查询对话状态 - 使用 POST + JSON body
+        retrieve_url = "https://api.coze.cn/v3/chat/retrieve"
+        retrieve_payload = {
+            "chat_id": chat_id,
+            "conversation_id": conversation_id
+        }
+        
+        log(f"Poll {i+1}/{max_retries}: POST {retrieve_url}")
+        log(f"Poll {i+1}/{max_retries}: payload={retrieve_payload}")
+        
+        resp = requests.post(
+            retrieve_url,
+            headers=headers,
+            json=retrieve_payload,
+            proxies=PROXIES if PROXIES else None,
+            timeout=30
+        )
+        
+        log(f"Poll {i+1}/{max_retries}: HTTP status={resp.status_code}")
+        log(f"Poll {i+1}/{max_retries}: raw response={resp.text[:500]}")
         
         if resp.status_code != 200:
             log(f"Poll {i+1}/{max_retries}: HTTP error {resp.status_code}")
@@ -246,7 +263,7 @@ def call_coze_chat_api(date_str, repos):
         
         data = resp.json()
         if data.get("code") != 0:
-            log(f"Poll {i+1}/{max_retries}: Business error {data.get('code')}, {data.get('msg')}")
+            log(f"Poll {i+1}/{max_retries}: Business error {data.get('code')}, msg={data.get('msg')}")
             continue
         
         chat_data = data.get("data", {})

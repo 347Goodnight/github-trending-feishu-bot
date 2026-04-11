@@ -173,24 +173,21 @@ def build_prompt(date_str, repos):
 
 def call_coze_chat_api(date_str, repos):
     """
-    调用 Coze Chat Completion API (同步接口)
+    调用 Coze Chat API
     """
     if not COZE_API_TOKEN or not COZE_BOT_ID:
         raise RuntimeError("COZE_API_TOKEN or COZE_BOT_ID is missing.")
-    
     prompt = build_prompt(date_str, repos)
     headers = {
         "Authorization": f"Bearer {COZE_API_TOKEN}",
         "Content-Type": "application/json"
     }
-    
-    # 使用 Chat Completion 同步接口
-    log("Calling Coze Chat Completion API...")
-    url = "https://api.coze.cn/v3/chat/completions"
+    log("Calling Coze Chat API...")
+    url = "https://api.coze.cn/v3/chat"
     payload = {
         "bot_id": COZE_BOT_ID,
         "user_id": "github-trending-bot",
-        "messages": [
+        "additional_messages": [
             {
                 "role": "user",
                 "content": prompt,
@@ -199,44 +196,55 @@ def call_coze_chat_api(date_str, repos):
         ],
         "stream": False
     }
-    
     resp = requests.post(
         url,
         headers=headers,
         json=payload,
         proxies=PROXIES if PROXIES else None,
-        timeout=180  # 同步接口可能需要更长时间
+        timeout=180
     )
-    
     log(f"Coze API status: {resp.status_code}")
-    
+    log(f"Coze API raw response: {resp.text[:1000]}")
     if resp.status_code != 200:
         raise RuntimeError(f"Coze API error: {resp.status_code}, {resp.text}")
-    
     data = resp.json()
-    log(f"Coze API response: {json.dumps(data, ensure_ascii=False)[:1000]}")
-    
     if data.get("code") != 0:
         raise RuntimeError(f"Coze business error: {data.get('code')}, {data.get('msg')}")
-    
-    # 解析响应
-    if "choices" in data and len(data["choices"]) > 0:
-        choice = data["choices"][0]
-        if "message" in choice:
-            content = choice["message"].get("content", "")
-            if content:
-                log(f"Got response from Coze, length={len(content)}")
-                return content.strip()
-    
-    # 尝试其他可能的响应格式
-    if "data" in data:
-        data_obj = data["data"]
-        if isinstance(data_obj, str):
-            return data_obj.strip()
-        elif isinstance(data_obj, dict):
+    # 尝试解析常见返回结构
+    report = None
+    # 结构1: data.messages
+    data_obj = data.get("data")
+    if isinstance(data_obj, dict):
+        messages = data_obj.get("messages")
+        if isinstance(messages, list):
+            for msg in reversed(messages):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if content and isinstance(content, str):
+                        report = content.strip()
+                        break
+        # 结构2: data.content
+        if not report:
             content = data_obj.get("content", "")
-            if content:
-                return content.strip()
+            if isinstance(content, str) and content.strip():
+                report = content.strip()
+    # 结构3: 顶层 messages
+    if not report and isinstance(data.get("messages"), list):
+        for msg in reversed(data["messages"]):
+            if msg.get("role") == "assistant":
+                content = msg.get("content", "")
+                if content and isinstance(content, str):
+                    report = content.strip()
+                    break
+    # 结构4: 顶层 content
+    if not report:
+        content = data.get("content", "")
+        if isinstance(content, str) and content.strip():
+            report = content.strip()
+    if not report:
+        raise RuntimeError(f"Unable to parse Coze response: {resp.text[:1000]}")
+    log(f"Got response from Coze, length={len(report)}")
+    return report
     
 
 

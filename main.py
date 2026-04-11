@@ -173,21 +173,20 @@ def build_prompt(date_str, repos):
 
 def call_coze_chat_api(date_str, repos):
     """
-    调用 Coze Chat API
+    调用 Coze Chat API (v3) - 支持异步轮询
     """
     if not COZE_API_TOKEN or not COZE_BOT_ID:
         raise RuntimeError("COZE_API_TOKEN or COZE_BOT_ID is missing.")
     
-    # 打印 token 和 bot_id 的前几个字符用于调试（不要打印完整的敏感信息）
-    log(f"COZE_API_TOKEN prefix: {COZE_API_TOKEN[:10]}... (length: {len(COZE_API_TOKEN)})")
-    log(f"COZE_BOT_ID: {COZE_BOT_ID}")
-    
     prompt = build_prompt(date_str, repos)
-    url = "https://api.coze.cn/v3/chat"
     headers = {
         "Authorization": f"Bearer {COZE_API_TOKEN}",
         "Content-Type": "application/json"
     }
+    
+    # Step 1: 创建对话
+    log("Step 1: Creating Coze chat...")
+    create_url = "https://api.coze.cn/v3/chat"
     payload = {
         "bot_id": COZE_BOT_ID,
         "user_id": "github-trending-bot",
@@ -200,75 +199,99 @@ def call_coze_chat_api(date_str, repos):
         ],
         "stream": False
     }
-    log("Calling Coze Chat API (v3)...")
-    log(f"Request URL: {url}")
-    log(f"Request headers: {json.dumps({k: v[:20] + '...' if k == 'Authorization' else v for k, v in headers.items()})}")
-    log(f"Request payload bot_id: {payload.get('bot_id')}")
     
     resp = requests.post(
-        url,
+        create_url,
         headers=headers,
         json=payload,
         proxies=PROXIES if PROXIES else None,
         timeout=120
     )
-    log(f"Coze Chat status: {resp.status_code}")
-    log(f"Coze Chat raw body: {resp.text[:2000]}")
+    
     if resp.status_code != 200:
         raise RuntimeError(f"Coze API error: {resp.status_code}, {resp.text}")
+    
     data = resp.json()
-    if isinstance(data, dict):
-        api_code = data.get("code")
-        if api_code not in (None, 0, "0"):
-            raise RuntimeError(
-                f"Coze business error: code={api_code}, "
-                f"msg={data.get('msg') or data.get('message')}"
+    if data.get("code") != 0:
+        raise RuntimeError(f"Coze business error: {data.get('code')}, {data.get('msg')}")
+    
+    chat_data = data.get("data", {})
+    chat_id = chat_data.get("id")
+    conversation_id = chat_data.get("conversation_id")
+    
+    if not chat_id:
+        raise RuntimeError(f"No chat_id in response: {resp.text[:500]}")
+    
+    log(f"Chat created: id={chat_id}, conversation_id={conversation_id}")
+    
+    # Step 2: 轮询获取结果
+    log("Step 2: Polling for chat result...")
+    max_retries = 30
+    retry_delay = 2
+    
+    for i in range(max_retries):
+        time.sleep(retry_delay)
+        
+        # 查询对话状态
+        retrieve_url = f"https://api.coze.cn/v3/chat/retrieve"
+        params = {
+            "chat_id": chat_id,
+            "conversation_id": conversation_id
+        }
+        
+        resp = requests.get(
+            retrieve_url,
+            headers=headers,
+            params=params,
+            proxies=PROXIES if PROXIES else None,
+            timeout=30
+        )
+        
+        if resp.status_code != 200:
+            log(f"Poll {i+1}/{max_retries}: HTTP error {resp.status_code}")
+            continue
+        
+        data = resp.json()
+        if data.get("code") != 0:
+            log(f"Poll {i+1}/{max_retries}: Business error {data.get('code')}")
+            continue
+        
+        chat_data = data.get("data", {})
+        status = chat_data.get("status")
+        
+        log(f"Poll {i+1}/{max_retries}: status={status}")
+        
+        if status == "completed":
+            # 获取消息列表
+            message_list_url = "https://api.coze.cn/v3/chat/message/list"
+            resp = requests.get(
+                message_list_url,
+                headers=headers,
+                params=params,
+                proxies=PROXIES if PROXIES else None,
+                timeout=30
             )
-    report = None
-    if isinstance(data, dict):
-        # 结构1：data.messages
-        chat_data = data.get("data")
-        if isinstance(chat_data, dict):
-            messages = chat_data.get("messages")
-            if isinstance(messages, list):
-                for msg in reversed(messages):
-                    if msg.get("role") == "assistant":
-                        content = msg.get("content")
-                        if isinstance(content, str) and content.strip():
-                            report = content.strip()
-                            break
-                        elif content:
-                            report = json.dumps(content, ensure_ascii=False)
-                            break
-            # 结构2：data.content
-            if not report:
-                content = chat_data.get("content")
-                if isinstance(content, str) and content.strip():
-                    report = content.strip()
-                elif content:
-                    report = json.dumps(content, ensure_ascii=False)
-        # 结构3：顶层 messages
-        if not report:
-            messages = data.get("messages")
-            if isinstance(messages, list):
-                for msg in reversed(messages):
-                    content = msg.get("content")
-                    if isinstance(content, str) and content.strip():
-                        report = content.strip()
-                        break
-                    elif content:
-                        report = json.dumps(content, ensure_ascii=False)
-                        break
-        # 结构4：顶层 content
-        if not report:
-            content = data.get("content")
-            if isinstance(content, str) and content.strip():
-                report = content.strip()
-            elif content:
-                report = json.dumps(content, ensure_ascii=False)
-    if not report:
-        raise RuntimeError(f"Unable to parse Coze response: {resp.text[:500]}")
-    return report
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("code") == 0:
+                    messages = data.get("data", [])
+                    for msg in reversed(messages):
+                        if msg.get("role") == "assistant":
+                            content = msg.get("content")
+                            if isinstance(content, str) and content.strip():
+                                log(f"Got response from assistant, length={len(content)}")
+                                return content.strip()
+                            elif content:
+                                return json.dumps(content, ensure_ascii=False)
+            
+            raise RuntimeError("Chat completed but no assistant message found")
+        
+        elif status == "failed":
+            last_error = chat_data.get("last_error", {})
+            raise RuntimeError(f"Chat failed: {last_error}")
+    
+    raise RuntimeError(f"Chat polling timeout after {max_retries} retries")
 
 
 def call_coze_workflow_api(date_str, repos):

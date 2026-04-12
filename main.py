@@ -13,7 +13,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 # 版本号
-CODE_VERSION = "2026-04-12-main-fix-05"
+CODE_VERSION = "2026-04-12-main-fix-06"
 
 # 配置
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "").strip()
@@ -245,15 +245,23 @@ def parse_stream_event_data(raw_data):
     return json.loads(raw_data)
 
 
+def decode_sse_line(raw_line):
+    """Decode one SSE line as UTF-8."""
+    if isinstance(raw_line, bytes):
+        return raw_line.decode("utf-8", errors="replace")
+    return raw_line
+
+
 def iter_sse_events(resp):
     """Yield SSE events as (event_name, joined_data)."""
     current_event = None
     data_lines = []
 
-    for raw_line in resp.iter_lines(decode_unicode=True):
+    for raw_line in resp.iter_lines(decode_unicode=False):
         if raw_line is None:
             continue
 
+        raw_line = decode_sse_line(raw_line)
         line = raw_line.rstrip("\r")
         if not line:
             if current_event or data_lines:

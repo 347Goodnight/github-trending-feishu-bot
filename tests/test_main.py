@@ -76,6 +76,21 @@ class ParseCozeStreamResponseTests(unittest.TestCase):
 
         self.assertEqual(parse_coze_stream_response(resp), "hello world")
 
+    def test_decodes_utf8_bytes(self):
+        lines = [
+            b"event:conversation.message.completed",
+            '{"role":"assistant","type":"answer","content":"你好"}'.encode("utf-8").join([b"data:", b""]),
+            b"",
+            b"event:done",
+            b'data:"[DONE]"',
+        ]
+        resp = SimpleNamespace(
+            iter_lines=lambda decode_unicode=False: iter(lines),
+            text="",
+        )
+
+        self.assertEqual(parse_coze_stream_response(resp), "你好")
+
 
 if __name__ == "__main__":
     unittest.main()

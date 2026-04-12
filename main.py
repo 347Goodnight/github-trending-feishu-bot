@@ -13,7 +13,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 # 版本号
-CODE_VERSION = "2026-04-12-main-fix-06"
+CODE_VERSION = "2026-04-12-main-fix-07"
 
 # 配置
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "").strip()
@@ -50,28 +50,31 @@ def get_today_str():
 
 
 def build_prompt(date_str, repos):
-    """构建 Coze 提示词"""
-    prompt = f"""请根据以下 {date_str} 的 GitHub Trending 数据，生成一份技术日报。
+    """Build a structured prompt for Coze report generation."""
+    prompt = f"""请根据以下 {date_str} 的 GitHub Trending 数据，生成一份适合飞书卡片展示的技术日报。
 
 要求：
-1. 标题使用 🔥 GitHub 每日热门项目 - {date_str}
-2. 分析今日趋势（2-3 句话总结）
-3. 列出 TOP 5 项目，每个项目包含：
-   - 项目名称和语言
-   - ⭐ 今日新增 stars 数
-   - 简短描述（中文）
-   - 项目链接
-4. 使用 Markdown 格式
-5. 语气专业但轻松
+1. 不要输出标题行，卡片头部已经有标题。
+2. 先输出“今日趋势分析”，用 2-3 句话总结。
+3. 输出“TOP 10 热门项目”。
+4. 每个项目严格使用下面这种风格：
+   - 第一行：🥇 1. owner/repo · Language
+   - 第二行：📈 今日新增 stars today · ⭐ 总 stars · 🍴 forks
+   - 第三行：简介：中文简介
+   - 第四行：链接：https://github.com/owner/repo
+5. 第 1 名用 🥇，第 2 名用 🥈，第 3 名用 🥉，第 4-10 名用 🏅。
+6. 字段名统一使用“简介”和“链接”，不要写“简短描述”“项目链接”。
+7. 链接必须直接输出完整 GitHub URL，不要写成 Markdown 超链接文本。
+8. 使用 Markdown 格式，但不要重复标题。
 
 数据：
 """
     for i, repo in enumerate(repos[:10], 1):
         prompt += f"\n{i}. {repo['name']} ({repo['language']})\n"
-        prompt += f"   Stars: {repo['stars']}, Today: +{repo['stars_today']}\n"
+        prompt += f"   Stars: {repo['stars']}, Today: +{repo['stars_today']}, Forks: {repo.get('forks', '0')}\n"
         prompt += f"   Description: {repo['description']}\n"
         prompt += f"   URL: {repo['url']}\n"
-    
+
     return prompt
 
 
@@ -108,6 +111,10 @@ def fetch_github_trending(top_n=10):
             # Stars
             stars_link = article.find("a", href=re.compile(r"/stargazers$"))
             stars = stars_link.get_text(strip=True).replace(",", "") if stars_link else "0"
+
+            # Forks
+            forks_link = article.find("a", href=re.compile(r"/forks$"))
+            forks = forks_link.get_text(strip=True).replace(",", "") if forks_link else "0"
             
             # 今日新增
             today_span = article.find("span", class_="d-inline-block float-sm-right")
@@ -123,6 +130,7 @@ def fetch_github_trending(top_n=10):
                 "description": description,
                 "language": language,
                 "stars": stars,
+                "forks": forks,
                 "stars_today": stars_today,
                 "url": f"https://github.com/{name}"
             })
@@ -424,50 +432,80 @@ def call_coze_generate_report(date_str, repos):
 def build_fallback_report(date_str, repos):
     """构建兜底报告"""
     lines = [
-        f"## 🔥 GitHub 每日热门项目 - {date_str}",
-        "",
         "> ⚠️ **兜底模式**：Coze AI 服务暂时不可用，以下为本地模板生成的项目列表。",
         "",
-        "### 📊 今日趋势",
+        "### 📊 今日趋势分析",
         "- 今日热门项目覆盖 AI、开发工具、自动化与基础设施等方向。",
         "- 开发者效率提升类工具持续受到关注。",
         "- 开源 AI 应用与工程化能力仍然是热点。",
         "",
-        "### 🏆 热门项目 TOP 10",
+        "### TOP 10 热门项目",
         ""
     ]
-    
+
     for i, repo in enumerate(repos, 1):
-        lines.append(f"**{i}. {repo['name']}** · {repo['language']}")
-        lines.append(f"📈 {repo['stars_today']} stars today · ⭐ {repo['stars']}")
+        if i == 1:
+            rank_emoji = "🥇"
+        elif i == 2:
+            rank_emoji = "🥈"
+        elif i == 3:
+            rank_emoji = "🥉"
+        else:
+            rank_emoji = "🏅"
+        lines.append(f"{rank_emoji} {i}. {repo['name']} · {repo['language']}")
+        lines.append(f"📈 {repo['stars_today']} stars today · ⭐ {repo['stars']} · 🍴 {repo.get('forks', '0')}")
         lines.append(f"简介：{repo['description']}")
         lines.append(f"链接：{repo['url']}")
         lines.append("")
-    
+
     lines.append("---")
     lines.append("🤖 由 GitHub Actions + Coze AI 自动生成")
     lines.append(f"⏰ 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+
     return "\n".join(lines)
 
 
 def remove_duplicate_title(report, date_str):
-    """移除重复的标题"""
-    title_pattern = f"🔥 GitHub 每日热门项目 - {date_str}"
-    lines = report.split('\n')
+    """移除正文中与卡片头部重复的标题。"""
+    title_pattern = re.compile(rf"^\s*#*\s*(?:🔥\s*)?GitHub\s*每日热门项目\s*-\s*{re.escape(date_str)}\s*$")
+    lines = report.split("\n")
     result = []
-    title_found = False
-    
+    skip_blank_after_title = False
+
     for line in lines:
-        if title_pattern in line and not title_found:
-            result.append(line)
-            title_found = True
-        elif title_pattern in line and title_found:
+        if title_pattern.match(line.strip()):
+            skip_blank_after_title = True
             continue
-        else:
-            result.append(line)
-    
-    return '\n'.join(result)
+        if skip_blank_after_title and not line.strip():
+            continue
+        skip_blank_after_title = False
+        result.append(line)
+
+    return "\n".join(result).strip()
+
+
+def normalize_report_content(report, date_str):
+    """Normalize AI output for Feishu card rendering."""
+    report = remove_duplicate_title(report, date_str)
+    report = report.replace("简短描述：", "简介：")
+    report = report.replace("项目链接：", "链接：")
+    report = report.replace("TOP 5 热门项目", "TOP 10 热门项目")
+    report = report.replace("TOP5 热门项目", "TOP 10 热门项目")
+    report = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\2", report)
+
+    normalized_lines = []
+    rank_map = {1: "🥇", 2: "🥈", 3: "🥉"}
+    for line in report.split("\n"):
+        stripped = line.strip()
+        match = re.match(r"^#?\s*(\d+)\.\s+(.+)$", stripped)
+        if match:
+            rank = int(match.group(1))
+            emoji = rank_map.get(rank, "🏅")
+            normalized_lines.append(f"{emoji} {rank}. {match.group(2)}")
+            continue
+        normalized_lines.append(line)
+
+    return "\n".join(normalized_lines).strip()
 
 
 def send_to_feishu(report, date_str=None, is_fallback=False, use_card=True):
@@ -507,16 +545,14 @@ def send_to_feishu_text(report_content):
 def send_to_feishu_card(date_str, report_content, is_fallback=False):
     """发送卡片消息到飞书"""
     log("Sending card message to Feishu...")
-    
-    # 移除 Markdown 标记，转换为文本
-    clean_content = report_content.replace('**', '').replace('## ', '').replace('### ', '')
-    
-    # 添加兜底模式标记
+
+    clean_content = normalize_report_content(report_content, date_str)
+
     if is_fallback:
         title_suffix = "（兜底模式）"
     else:
         title_suffix = ""
-    
+
     payload = {
         "msg_type": "interactive",
         "card": {
@@ -535,7 +571,7 @@ def send_to_feishu_card(date_str, report_content, is_fallback=False):
                     "tag": "div",
                     "text": {
                         "tag": "lark_md",
-                        "content": clean_content[:3000]  # 限制长度
+                        "content": clean_content[:3000]
                     }
                 },
                 {
@@ -550,9 +586,9 @@ def send_to_feishu_card(date_str, report_content, is_fallback=False):
             ]
         }
     }
-    
+
     resp = requests.post(FEISHU_WEBHOOK, json=payload, **request_kwargs(30))
-    
+
     if resp.status_code == 200:
         result = resp.json()
         if result.get("code") == 0:

@@ -1,7 +1,12 @@
 import unittest
 from types import SimpleNamespace
 
-from main import extract_assistant_reply, parse_coze_stream_response
+from main import (
+    extract_assistant_reply,
+    normalize_report_content,
+    parse_coze_stream_response,
+    remove_duplicate_title,
+)
 
 
 class ExtractAssistantReplyTests(unittest.TestCase):
@@ -90,6 +95,26 @@ class ParseCozeStreamResponseTests(unittest.TestCase):
         )
 
         self.assertEqual(parse_coze_stream_response(resp), "你好")
+
+
+class ReportFormattingTests(unittest.TestCase):
+    def test_remove_duplicate_title(self):
+        report = "# 🔥 GitHub 每日热门项目 - 2026-04-12\n\n内容"
+        self.assertEqual(remove_duplicate_title(report, "2026-04-12"), "内容")
+
+    def test_normalize_report_content(self):
+        report = (
+            "# 🔥 GitHub 每日热门项目 - 2026-04-12\n\n"
+            "TOP 5 热门项目\n\n"
+            "#1. microsoft/markitdown · Python\n"
+            "简短描述：文档转换工具\n"
+            "项目链接：[GitHub](https://github.com/microsoft/markitdown)\n"
+        )
+        normalized = normalize_report_content(report, "2026-04-12")
+        self.assertIn("TOP 10 热门项目", normalized)
+        self.assertIn("🥇 1. microsoft/markitdown · Python", normalized)
+        self.assertIn("简介：文档转换工具", normalized)
+        self.assertIn("链接：https://github.com/microsoft/markitdown", normalized)
 
 
 if __name__ == "__main__":

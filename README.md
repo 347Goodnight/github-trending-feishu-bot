@@ -11,7 +11,8 @@
 - 🔄 支持手动触发
 - 🛡️ 内置兜底报告（Coze 失败时自动生成基础报告）
 - 🔍 内置诊断脚本，可检查 Coze Chat 全链路
-- 🎨 自动删除重复标题，避免卡片头部和内容重复
+- 🎨 自动去重正文标题，避免卡片头部和正文重复
+- 🏅 自动规范项目格式，统一显示排名、Stars、Forks、简介和完整链接
 
 ## 📁 项目结构
 
@@ -78,9 +79,28 @@ Fork 本仓库或创建一个新的 GitHub 仓库。
 3. 点击 **Run workflow** 手动触发
 4. 检查飞书群是否收到消息
 
-## 📝 输出说明
+## 📝 卡片展示说明
 
-正常情况下，飞书卡片会显示 Coze 生成的日报正文。
+正常情况下，飞书卡片会展示：
+
+- `今日趋势分析`
+- `TOP 10 热门项目`
+- 每个项目的统一格式：
+
+```text
+🥇 1. microsoft/markitdown · Python
+📈2352 stars | ⭐100457 stars | 🍴 6161 forks
+简介：将 Office / PDF / HTML 等内容转换为 Markdown 的工具
+链接：https://github.com/microsoft/markitdown
+```
+
+说明：
+
+- 卡片头部已经带标题，正文会自动去掉重复标题。
+- 项目排名默认使用 `🥇 / 🥈 / 🥉 / 🏅`。
+- 统计行统一使用 `|` 作为分隔符。
+- 字段名统一为 `简介` 和 `链接`。
+- GitHub 链接会直接输出完整地址，而不是只显示 `GitHub` 文本。
 
 如果 Coze 调用失败，系统会自动进入兜底模式，继续推送基础项目列表，保证当天不会断更。
 
@@ -116,36 +136,30 @@ on:
 常见原因：
 
 - `COZE_API_TOKEN`、`COZE_BOT_ID` 或 `COZE_WORKFLOW_ID` 配置错误
-- Coze Chat 创建成功，但后续消息列表中没有取到 assistant 正文
-- Coze Workflow 已配置，但仓库 Secrets 中没有设置 `COZE_WORKFLOW_ID`
-- 网络波动、代理问题或 Coze 服务临时异常
+- Coze 服务临时异常
+- 网络波动或代理问题
 
 建议排查顺序：
 
 1. 检查仓库 Secrets 是否完整，尤其是 `COZE_API_TOKEN`、`COZE_BOT_ID`、`COZE_WORKFLOW_ID`
-2. 手动运行 GitHub Actions，查看日志中的这些字段是否显示为 configured
-3. 先执行诊断脚本 `python diagnose_coze.py`
-4. 确认 Coze 接口链路是否完整跑通：
-   - `POST /v3/chat`
-   - `POST /v3/chat/retrieve`
-   - `POST /v1/conversation/message/list`
-5. 如果 `retrieve` 成功但 `message/list` 没拿到 assistant 内容，通常就会触发兜底
+2. 手动运行 GitHub Actions，查看日志中的配置是否显示为 configured
+3. 执行诊断脚本 `python diagnose_coze.py`
+4. 检查流式响应是否能拿到 `assistant preview`
 
-### Q2: 如何确认当前是不是走了 Workflow 模式？
+### Q2: 标题重复了怎么办？
 
-运行日志中会打印：
+代码已自动处理。`remove_duplicate_title()` 会移除正文中与卡片头部重复的标题，只保留卡片头部标题。
 
-- `Using Coze Workflow API...`
-- 或 `Using Coze Chat API...`
+### Q3: 项目展示格式不统一怎么办？
 
-如果你已经设置了 `COZE_WORKFLOW_ID`，但日志里仍然显示 Chat API，优先检查：
+代码会在发送飞书卡片前统一格式：
 
-- GitHub Secrets 里是否真的存在 `COZE_WORKFLOW_ID`
-- `.github/workflows/daily.yml` 是否把它注入到了运行环境
-
-### Q3: 标题重复了怎么办？
-
-代码已自动处理。`remove_duplicate_title()` 会自动删除 Coze 正文里的重复标题，只保留卡片头部标题。
+- `TOP 5` 会自动规范成 `TOP 10`
+- `简短描述` 会自动改成 `简介`
+- `项目链接` 会自动改成 `链接`
+- Markdown 链接会自动展开成完整 URL
+- 项目编号会自动转成 `🥇 / 🥈 / 🥉 / 🏅`
+- 统计行会统一成 `📈x stars | ⭐y stars | 🍴 z forks`
 
 ### Q4: 如何只使用本地模式（不调用 Coze）？
 

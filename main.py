@@ -492,6 +492,8 @@ def normalize_report_content(report, date_str):
     report = report.replace("TOP 5 热门项目", "TOP 10 热门项目")
     report = report.replace("TOP5 热门项目", "TOP 10 热门项目")
     report = re.sub(r"\[([^\]]+)\]\((https?://[^)]+)\)", r"\2", report)
+    report = re.sub(r"[^\n]*stars\s*(\d+)\s*[·|]\s*[^\n]*stars\s*(\d+)\s*[·|]\s*[^\n]*forks\s*(\d+)", r"📈\1 stars | ⭐\2 stars | 🍴 \3 forks", report)
+    report = re.sub(r"📈\s*(\d+)\s*stars\s*today\s*[·|]\s*⭐\s*(\d+)\s*[·|]\s*🍴\s*(\d+)", r"📈\1 stars | ⭐\2 stars | 🍴 \3 forks", report)
 
     normalized_lines = []
     rank_map = {1: "🥇", 2: "🥈", 3: "🥉"}

@@ -2,9 +2,9 @@ name: Daily GitHub Trending Report
 
 on:
   schedule:
-    # 每天晚上 10:00 (UTC+8) 运行
-    # UTC 时间 14:00 = 北京时间 22:00
-    - cron: '0 14 * * *'
+    # 每天晚上 9:00 (UTC+8) 运行
+    # UTC 时间 13:00 = 北京时间 21:00
+    - cron: '0 13 * * *'
   workflow_dispatch:  # 允许手动触发
 
 env:

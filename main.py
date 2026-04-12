@@ -198,14 +198,13 @@ def fetch_chat_message_list(headers, conversation_id, chat_id):
             f"Missing conversation_id or chat_id: conversation_id={conversation_id}, chat_id={chat_id}"
         )
 
-    url = f"https://api.coze.cn/v1/conversation/message/list?conversation_id={conversation_id}"
-    payload = {
-        "chat_id": chat_id,
-        "order": "desc",
-        "limit": 50
+    url = "https://api.coze.cn/v3/chat/message/list"
+    params = {
+        "conversation_id": conversation_id,
+        "chat_id": chat_id
     }
     log(f"Fetching chat messages: conversation_id={conversation_id}, chat_id={chat_id}")
-    resp = requests.post(url, headers=headers, json=payload, **request_kwargs(30))
+    resp = requests.get(url, headers=headers, params=params, **request_kwargs(30))
     log(f"Message list status: {resp.status_code}")
     log(f"Message list raw response: {resp.text[:1000]}")
 
@@ -305,16 +304,16 @@ def call_coze_chat_api(date_str, repos):
         retry_delay = min(initial_delay + i * 0.5, max_delay)
         time.sleep(retry_delay)
         retrieve_url = "https://api.coze.cn/v3/chat/retrieve"
-        retrieve_payload = {
+        retrieve_params = {
             "chat_id": chat_obj_id,
             "conversation_id": conversation_id
         }
         log(f"Poll {i+1}/{max_retries}: POST {retrieve_url}")
-        log(f"Poll {i+1}/{max_retries}: payload={retrieve_payload}")
+        log(f"Poll {i+1}/{max_retries}: params={retrieve_params}")
         resp = requests.post(
             retrieve_url,
             headers=headers,
-            json=retrieve_payload,
+            params=retrieve_params,
             **request_kwargs(30)
         )
         log(f"Poll {i+1}/{max_retries}: HTTP status={resp.status_code}")

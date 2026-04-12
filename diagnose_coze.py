@@ -90,48 +90,58 @@ print(f"  chat_id: {chat_obj_id}")
 print(f"  conversation_id: {conversation_id}")
 print(f"  status: {chat_data.get('status')}")
 
-print("\n  Step 2: wait 2 seconds")
-time.sleep(2)
+print("\n  Step 2: poll /v3/chat/retrieve until completed")
+resp3 = None
+for attempt in range(1, 11):
+    time.sleep(1)
+    retrieve_params = {
+        "chat_id": chat_obj_id,
+        "conversation_id": conversation_id
+    }
+    resp2 = requests.post(
+        "https://api.coze.cn/v3/chat/retrieve",
+        headers=headers,
+        params=retrieve_params,
+        timeout=30
+    )
+    print(f"  RETRIEVE[{attempt}] HTTP status: {resp2.status_code}")
+    print(f"  RETRIEVE[{attempt}] request: {json.dumps(retrieve_params, ensure_ascii=False)}")
+    print(f"  RETRIEVE[{attempt}] response: {resp2.text[:1000]}")
 
-print("\n  Step 3: POST /v3/chat/retrieve")
-retrieve_payload = {
+    if resp2.status_code != 200:
+        print("  retrieve request failed")
+        raise SystemExit(1)
+
+    data2 = resp2.json()
+    if data2.get("code") != 0:
+        print(f"  retrieve business error: code={data2.get('code')}, msg={data2.get('msg')}")
+        raise SystemExit(1)
+
+    status = data2.get("data", {}).get("status")
+    if status == "completed":
+        print("  chat completed")
+        break
+    if status == "failed":
+        print(f"  chat failed: {data2}")
+        raise SystemExit(1)
+else:
+    print("  chat did not complete within polling window")
+    raise SystemExit(1)
+
+print("\n  Step 3: GET /v3/chat/message/list")
+message_list_url = "https://api.coze.cn/v3/chat/message/list"
+message_list_params = {
     "chat_id": chat_obj_id,
     "conversation_id": conversation_id
 }
-resp2 = requests.post(
-    "https://api.coze.cn/v3/chat/retrieve",
-    headers=headers,
-    json=retrieve_payload,
-    timeout=30
-)
-print(f"  RETRIEVE HTTP status: {resp2.status_code}")
-print(f"  RETRIEVE request: {json.dumps(retrieve_payload, ensure_ascii=False)}")
-print(f"  RETRIEVE response: {resp2.text[:1000]}")
-
-if resp2.status_code != 200:
-    print("  retrieve request failed")
-    raise SystemExit(1)
-
-data2 = resp2.json()
-if data2.get("code") != 0:
-    print(f"  retrieve business error: code={data2.get('code')}, msg={data2.get('msg')}")
-    raise SystemExit(1)
-
-print("\n  Step 4: POST /v1/conversation/message/list")
-message_list_url = f"https://api.coze.cn/v1/conversation/message/list?conversation_id={conversation_id}"
-message_list_payload = {
-    "chat_id": chat_obj_id,
-    "order": "desc",
-    "limit": 20
-}
-resp3 = requests.post(
+resp3 = requests.get(
     message_list_url,
     headers=headers,
-    json=message_list_payload,
+    params=message_list_params,
     timeout=30
 )
 print(f"  MESSAGE LIST HTTP status: {resp3.status_code}")
-print(f"  MESSAGE LIST request: {json.dumps(message_list_payload, ensure_ascii=False)}")
+print(f"  MESSAGE LIST request: {json.dumps(message_list_params, ensure_ascii=False)}")
 print(f"  MESSAGE LIST response: {resp3.text[:1000]}")
 
 if resp3.status_code != 200:

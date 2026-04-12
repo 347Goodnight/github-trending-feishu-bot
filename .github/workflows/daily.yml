@@ -34,6 +34,7 @@ jobs:
         FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         COZE_API_TOKEN: ${{ secrets.COZE_API_TOKEN }}
         COZE_BOT_ID: ${{ secrets.COZE_BOT_ID }}
+        COZE_WORKFLOW_ID: ${{ secrets.COZE_WORKFLOW_ID }}
       run: python diagnose_coze.py
 
     - name: Run bot
@@ -41,6 +42,7 @@ jobs:
         FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         COZE_API_TOKEN: ${{ secrets.COZE_API_TOKEN }}
         COZE_BOT_ID: ${{ secrets.COZE_BOT_ID }}
+        COZE_WORKFLOW_ID: ${{ secrets.COZE_WORKFLOW_ID }}
         HTTP_PROXY: ${{ secrets.HTTP_PROXY }}
         HTTPS_PROXY: ${{ secrets.HTTPS_PROXY }}
       run: python main.py

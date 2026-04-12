@@ -13,7 +13,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 # 版本号
-CODE_VERSION = "2026-04-11-main-fix-03"
+CODE_VERSION = "2026-04-12-main-fix-04"
 
 # 配置
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "").strip()
@@ -171,6 +171,73 @@ def parse_coze_response(resp_data):
     )
 
 
+def extract_assistant_reply(messages):
+    """Extract the best assistant reply from a message list."""
+    if not isinstance(messages, list):
+        return ""
+
+    for preferred_type in ("answer", None):
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            if msg.get("role") != "assistant":
+                continue
+            if preferred_type and msg.get("type") != preferred_type:
+                continue
+            content = msg.get("content", "")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+
+    return ""
+
+
+def fetch_chat_message_list(headers, conversation_id, chat_id):
+    """Fetch the final assistant message for a completed chat."""
+    if not conversation_id or not chat_id:
+        raise RuntimeError(
+            f"Missing conversation_id or chat_id: conversation_id={conversation_id}, chat_id={chat_id}"
+        )
+
+    url = f"https://api.coze.cn/v1/conversation/message/list?conversation_id={conversation_id}"
+    payload = {
+        "chat_id": chat_id,
+        "order": "desc",
+        "limit": 50
+    }
+    log(f"Fetching chat messages: conversation_id={conversation_id}, chat_id={chat_id}")
+    resp = requests.post(url, headers=headers, json=payload, **request_kwargs(30))
+    log(f"Message list status: {resp.status_code}")
+    log(f"Message list raw response: {resp.text[:1000]}")
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"Message list HTTP error: {resp.status_code}, {resp.text[:500]}")
+
+    data = resp.json()
+    if data.get("code") != 0:
+        raise RuntimeError(
+            f"Message list business error: {data.get('code')}, {data.get('msg')}, resp={resp.text[:500]}"
+        )
+
+    messages = data.get("data", [])
+    reply = extract_assistant_reply(messages)
+    if reply:
+        log(f"Got response from message list, length={len(reply)}")
+        return reply
+
+    raise RuntimeError(
+        f"Unable to find assistant reply in message list: {json.dumps(data, ensure_ascii=False)[:1000]}"
+    )
+
+
+def resolve_chat_report(headers, conversation_id, chat_id, resp_data):
+    """Try direct parsing first, then fall back to the message list API."""
+    try:
+        return parse_coze_response(resp_data)
+    except RuntimeError as err:
+        log(f"Direct chat parse failed, fallback to message list. Error: {err}")
+        return fetch_chat_message_list(headers, conversation_id, chat_id)
+
+
 def call_coze_chat_api(date_str, repos):
     """
     调用 Coze Chat API (异步轮询)
@@ -225,7 +292,7 @@ def call_coze_chat_api(date_str, repos):
     )
     # 如果创建接口直接返回 completed，就直接解析
     if status == "completed":
-        return parse_coze_response(data)
+        return resolve_chat_report(headers, conversation_id, chat_obj_id, data)
     if status == "failed":
         last_error = chat_data.get("last_error", {})
         raise RuntimeError(f"Chat failed on create: {last_error}")
@@ -274,7 +341,7 @@ def call_coze_chat_api(date_str, repos):
         log(f"Poll {i+1}/{max_retries}: status={status}")
         if status == "completed":
             log("Chat completed!")
-            return parse_coze_response(data)
+            return resolve_chat_report(headers, conversation_id, chat_obj_id, data)
         if status == "failed":
             last_error = chat_data.get("last_error", {})
             raise RuntimeError(f"Chat failed: {last_error}")

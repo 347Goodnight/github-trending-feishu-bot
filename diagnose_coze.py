@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-import os
 import json
-import time
+import os
 import requests
 from datetime import datetime
 
-DIAGNOSE_VERSION = "2026-04-12-diagnose-fix-04"
+DIAGNOSE_VERSION = "2026-04-12-diagnose-fix-05"
 
 COZE_API_TOKEN = os.getenv("COZE_API_TOKEN", "").strip()
 COZE_BOT_ID = os.getenv("COZE_BOT_ID", "").strip()
@@ -44,10 +43,10 @@ if not COZE_API_TOKEN or not COZE_BOT_ID:
 
 headers = {
     "Authorization": f"Bearer {COZE_API_TOKEN}",
-    "Content-Type": "application/json"
+    "Content-Type": "application/json",
 }
 
-print("\n[2] Test Coze Chat create -> retrieve -> message/list")
+print("\n[2] Test Coze Chat stream")
 print("-" * 70)
 
 create_payload = {
@@ -57,113 +56,73 @@ create_payload = {
         {
             "role": "user",
             "content": "Please reply with: hello",
-            "content_type": "text"
+            "content_type": "text",
         }
     ],
-    "stream": False
+    "stream": True,
 }
 
-print("  Step 1: POST /v3/chat")
+print("  Step 1: POST /v3/chat (stream=true)")
 resp = requests.post(
     "https://api.coze.cn/v3/chat",
     headers=headers,
     json=create_payload,
-    timeout=30
+    stream=True,
+    timeout=30,
 )
 print(f"  CREATE HTTP status: {resp.status_code}")
-print(f"  CREATE response: {resp.text[:1000]}")
 
 if resp.status_code != 200:
     print("  create request failed")
     raise SystemExit(1)
 
-data = resp.json()
-if data.get("code") != 0:
-    print(f"  create business error: code={data.get('code')}, msg={data.get('msg')}")
+print("\n  Step 2: read stream events")
+current_event = None
+answer_chunks = []
+completed_answer = ""
+chat_failed = None
+
+for raw_line in resp.iter_lines(decode_unicode=True):
+    if raw_line is None:
+        continue
+
+    line = raw_line.strip()
+    if not line:
+        continue
+
+    print(f"  STREAM {line[:300]}")
+
+    if line.startswith("event:"):
+        current_event = line[len("event:"):].strip()
+        continue
+
+    if not line.startswith("data:"):
+        continue
+
+    payload_text = line[len("data:"):].strip()
+    if not payload_text or payload_text == '"[DONE]"':
+        continue
+
+    payload = json.loads(payload_text)
+    if current_event == "conversation.message.delta":
+        if payload.get("role") == "assistant" and payload.get("type") == "answer":
+            answer_chunks.append(payload.get("content", ""))
+    elif current_event == "conversation.message.completed":
+        if payload.get("role") == "assistant" and payload.get("type") == "answer":
+            completed_answer = payload.get("content", "")
+    elif current_event == "conversation.chat.failed":
+        chat_failed = payload.get("last_error", payload)
+
+if chat_failed:
+    print(f"  chat failed: {chat_failed}")
     raise SystemExit(1)
 
-chat_data = data.get("data", {})
-chat_obj_id = chat_data.get("id")
-conversation_id = chat_data.get("conversation_id")
-
-print(f"  chat_id: {chat_obj_id}")
-print(f"  conversation_id: {conversation_id}")
-print(f"  status: {chat_data.get('status')}")
-
-print("\n  Step 2: poll /v3/chat/retrieve until completed")
-resp3 = None
-for attempt in range(1, 11):
-    time.sleep(1)
-    retrieve_params = {
-        "chat_id": chat_obj_id,
-        "conversation_id": conversation_id
-    }
-    resp2 = requests.post(
-        "https://api.coze.cn/v3/chat/retrieve",
-        headers=headers,
-        params=retrieve_params,
-        timeout=30
-    )
-    print(f"  RETRIEVE[{attempt}] HTTP status: {resp2.status_code}")
-    print(f"  RETRIEVE[{attempt}] request: {json.dumps(retrieve_params, ensure_ascii=False)}")
-    print(f"  RETRIEVE[{attempt}] response: {resp2.text[:1000]}")
-
-    if resp2.status_code != 200:
-        print("  retrieve request failed")
-        raise SystemExit(1)
-
-    data2 = resp2.json()
-    if data2.get("code") != 0:
-        print(f"  retrieve business error: code={data2.get('code')}, msg={data2.get('msg')}")
-        raise SystemExit(1)
-
-    status = data2.get("data", {}).get("status")
-    if status == "completed":
-        print("  chat completed")
-        break
-    if status == "failed":
-        print(f"  chat failed: {data2}")
-        raise SystemExit(1)
-else:
-    print("  chat did not complete within polling window")
+final_answer = completed_answer.strip() or "".join(answer_chunks).strip()
+if not final_answer:
+    print("  no assistant reply found in stream events")
     raise SystemExit(1)
 
-print("\n  Step 3: GET /v3/chat/message/list")
-message_list_url = "https://api.coze.cn/v3/chat/message/list"
-message_list_params = {
-    "chat_id": chat_obj_id,
-    "conversation_id": conversation_id
-}
-resp3 = requests.get(
-    message_list_url,
-    headers=headers,
-    params=message_list_params,
-    timeout=30
-)
-print(f"  MESSAGE LIST HTTP status: {resp3.status_code}")
-print(f"  MESSAGE LIST request: {json.dumps(message_list_params, ensure_ascii=False)}")
-print(f"  MESSAGE LIST response: {resp3.text[:1000]}")
-
-if resp3.status_code != 200:
-    print("  message list request failed")
-    raise SystemExit(1)
-
-data3 = resp3.json()
-if data3.get("code") != 0:
-    print(f"  message list business error: code={data3.get('code')}, msg={data3.get('msg')}")
-    raise SystemExit(1)
-
-assistant_messages = [
-    item for item in data3.get("data", [])
-    if item.get("role") == "assistant" and isinstance(item.get("content"), str) and item.get("content").strip()
-]
-
-if not assistant_messages:
-    print("  no assistant reply found in message list")
-    raise SystemExit(1)
-
-answer = next((item for item in assistant_messages if item.get("type") == "answer"), assistant_messages[0])
-print(f"  assistant preview: {answer.get('content', '')[:200]}")
+print(f"  assistant preview: {final_answer[:200]}")
 
 print("\n" + "=" * 70)
 print("Diagnostic complete")

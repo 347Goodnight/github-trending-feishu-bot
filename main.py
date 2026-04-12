@@ -13,7 +13,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 
 # 版本号
-CODE_VERSION = "2026-04-12-main-fix-04"
+CODE_VERSION = "2026-04-12-main-fix-05"
 
 # 配置
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "").strip()
@@ -237,10 +237,71 @@ def resolve_chat_report(headers, conversation_id, chat_id, resp_data):
         return fetch_chat_message_list(headers, conversation_id, chat_id)
 
 
+def parse_stream_event_data(raw_data):
+    """Parse one SSE data payload."""
+    raw_data = raw_data.strip()
+    if not raw_data or raw_data == '"[DONE]"':
+        return None
+    return json.loads(raw_data)
+
+
+def parse_coze_stream_response(resp):
+    """Parse Coze streaming chat events and return the assistant reply."""
+    delta_chunks = []
+    completed_answer = ""
+    last_chat_error = None
+    current_event = None
+
+    for raw_line in resp.iter_lines(decode_unicode=True):
+        if raw_line is None:
+            continue
+
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        if line.startswith("event:"):
+            current_event = line[len("event:"):].strip()
+            continue
+
+        if not line.startswith("data:"):
+            continue
+
+        payload = parse_stream_event_data(line[len("data:"):])
+        if payload is None:
+            continue
+
+        if current_event == "conversation.message.delta":
+            if payload.get("role") == "assistant" and payload.get("type") == "answer":
+                content = payload.get("content", "")
+                if isinstance(content, str) and content:
+                    delta_chunks.append(content)
+        elif current_event == "conversation.message.completed":
+            if payload.get("role") == "assistant" and payload.get("type") == "answer":
+                content = payload.get("content", "")
+                if isinstance(content, str) and content.strip():
+                    completed_answer = content.strip()
+        elif current_event == "conversation.chat.failed":
+            last_chat_error = payload.get("last_error", payload)
+
+    if completed_answer:
+        log(f"Got response from stream completed event, length={len(completed_answer)}")
+        return completed_answer
+
+    if delta_chunks:
+        reply = "".join(delta_chunks).strip()
+        if reply:
+            log(f"Got response from stream delta events, length={len(reply)}")
+            return reply
+
+    if last_chat_error:
+        raise RuntimeError(f"Chat failed in stream mode: {last_chat_error}")
+
+    raise RuntimeError(f"Unable to parse Coze stream response: {resp.text[:1000]}")
+
+
 def call_coze_chat_api(date_str, repos):
-    """
-    调用 Coze Chat API (异步轮询)
-    """
+    """Call Coze Chat API in stream mode and parse SSE events."""
     if not COZE_API_TOKEN or not COZE_BOT_ID:
         raise RuntimeError("COZE_API_TOKEN or COZE_BOT_ID is missing.")
     prompt = build_prompt(date_str, repos)
@@ -248,8 +309,7 @@ def call_coze_chat_api(date_str, repos):
         "Authorization": f"Bearer {COZE_API_TOKEN}",
         "Content-Type": "application/json"
     }
-    # Step 1: 创建 chat
-    log("Step 1: Creating Coze chat...")
+    log("Step 1: Creating Coze chat stream...")
     create_url = "https://api.coze.cn/v3/chat"
     payload = {
         "bot_id": COZE_BOT_ID,
@@ -261,96 +321,19 @@ def call_coze_chat_api(date_str, repos):
                 "content_type": "text"
             }
         ],
-        "stream": False
+        "stream": True
     }
     resp = requests.post(
         create_url,
         headers=headers,
         json=payload,
-        **request_kwargs(60)
+        stream=True,
+        **request_kwargs(120)
     )
-    log(f"Create chat status: {resp.status_code}")
-    log(f"Create chat raw response: {resp.text[:1000]}")
+    log(f"Create chat stream status: {resp.status_code}")
     if resp.status_code != 200:
-        raise RuntimeError(f"Create chat error: {resp.status_code}, {resp.text}")
-    data = resp.json()
-    if data.get("code") != 0:
-        raise RuntimeError(
-            f"Create chat business error: {data.get('code')}, {data.get('msg')}, resp={resp.text[:500]}"
-        )
-    chat_data = data.get("data", {})
-    chat_obj_id = chat_data.get("id")
-    conversation_id = chat_data.get("conversation_id")
-    status = chat_data.get("status")
-    log(f"Create chat parsed data: {json.dumps(chat_data, ensure_ascii=False)}")
-    if not chat_obj_id:
-        raise RuntimeError(f"No id in response: {resp.text[:500]}")
-    log(
-        f"Chat created: object_id={chat_obj_id}, "
-        f"conversation_id={conversation_id}, status={status}"
-    )
-    # 如果创建接口直接返回 completed，就直接解析
-    if status == "completed":
-        return resolve_chat_report(headers, conversation_id, chat_obj_id, data)
-    if status == "failed":
-        last_error = chat_data.get("last_error", {})
-        raise RuntimeError(f"Chat failed on create: {last_error}")
-    # Step 2: 轮询
-    log("Step 2: Polling for chat result...")
-    max_retries = 10
-    initial_delay = 2
-    max_delay = 5
-    for i in range(max_retries):
-        retry_delay = min(initial_delay + i * 0.5, max_delay)
-        time.sleep(retry_delay)
-        retrieve_url = "https://api.coze.cn/v3/chat/retrieve"
-        retrieve_params = {
-            "chat_id": chat_obj_id,
-            "conversation_id": conversation_id
-        }
-        log(f"Poll {i+1}/{max_retries}: POST {retrieve_url}")
-        log(f"Poll {i+1}/{max_retries}: params={retrieve_params}")
-        resp = requests.post(
-            retrieve_url,
-            headers=headers,
-            params=retrieve_params,
-            **request_kwargs(30)
-        )
-        log(f"Poll {i+1}/{max_retries}: HTTP status={resp.status_code}")
-        log(f"Poll {i+1}/{max_retries}: raw response={resp.text[:500]}")
-        if resp.status_code != 200:
-            raise RuntimeError(
-                f"Poll HTTP error: status={resp.status_code}, resp={resp.text[:500]}"
-            )
-        data = resp.json()
-        if data.get("code") != 0:
-            code = data.get("code")
-            msg = data.get("msg", "")
-            log(f"Poll {i+1}/{max_retries}: Business error {code}, msg={msg}")
-            # 永久错误直接失败，不要继续重试
-            if code in (4001, 4100):
-                raise RuntimeError(
-                    f"Coze retrieve failed permanently: code={code}, msg={msg}, "
-                    f"object_id={chat_obj_id}, conversation_id={conversation_id}, "
-                    f"resp={resp.text[:500]}"
-                )
-            continue
-        chat_data = data.get("data", {})
-        status = chat_data.get("status")
-        log(f"Poll {i+1}/{max_retries}: status={status}")
-        if status == "completed":
-            log("Chat completed!")
-            return resolve_chat_report(headers, conversation_id, chat_obj_id, data)
-        if status == "failed":
-            last_error = chat_data.get("last_error", {})
-            raise RuntimeError(f"Chat failed: {last_error}")
-        if status in ("in_progress", "queued", "processing"):
-            continue
-        log(f"Poll {i+1}/{max_retries}: unexpected status={status}")
-    raise RuntimeError(
-        f"Chat polling timeout after {max_retries} retries, "
-        f"object_id={chat_obj_id}, conversation_id={conversation_id}"
-    )
+        raise RuntimeError(f"Create chat stream error: {resp.status_code}, {resp.text[:500]}")
+    return parse_coze_stream_response(resp)
 
 
 def call_coze_workflow_api(date_str, repos):

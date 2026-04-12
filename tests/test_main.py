@@ -1,6 +1,7 @@
 import unittest
+from types import SimpleNamespace
 
-from main import extract_assistant_reply
+from main import extract_assistant_reply, parse_coze_stream_response
 
 
 class ExtractAssistantReplyTests(unittest.TestCase):
@@ -19,6 +20,29 @@ class ExtractAssistantReplyTests(unittest.TestCase):
         ]
 
         self.assertEqual(extract_assistant_reply(messages), "card content")
+
+
+class ParseCozeStreamResponseTests(unittest.TestCase):
+    def test_returns_completed_answer(self):
+        lines = [
+            "event:conversation.chat.created",
+            'data:{"id":"1","conversation_id":"2","status":"created"}',
+            "",
+            "event:conversation.message.delta",
+            'data:{"role":"assistant","type":"answer","content":"hello "}',
+            "",
+            "event:conversation.message.completed",
+            'data:{"role":"assistant","type":"answer","content":"hello world"}',
+            "",
+            "event:done",
+            'data:"[DONE]"',
+        ]
+        resp = SimpleNamespace(
+            iter_lines=lambda decode_unicode=True: iter(lines),
+            text="\n".join(lines),
+        )
+
+        self.assertEqual(parse_coze_stream_response(resp), "hello world")
 
 
 if __name__ == "__main__":

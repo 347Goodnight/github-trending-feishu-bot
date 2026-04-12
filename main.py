@@ -268,6 +268,11 @@ def iter_sse_events(resp):
 
         if line.startswith("data:"):
             data_lines.append(line[len("data:"):].lstrip())
+            continue
+
+        # Some transports may split one JSON payload into a bare continuation line.
+        if data_lines:
+            data_lines[-1] += line
 
     if current_event or data_lines:
         yield current_event, "\n".join(data_lines)

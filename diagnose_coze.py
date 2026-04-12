@@ -4,7 +4,7 @@ import os
 import requests
 from datetime import datetime
 
-DIAGNOSE_VERSION = "2026-04-12-diagnose-fix-05"
+DIAGNOSE_VERSION = "2026-04-12-diagnose-fix-06"
 
 COZE_API_TOKEN = os.getenv("COZE_API_TOKEN", "").strip()
 COZE_BOT_ID = os.getenv("COZE_BOT_ID", "").strip()
@@ -104,6 +104,10 @@ for raw_line in resp.iter_lines(decode_unicode=True):
 
     if line.startswith("data:"):
         data_lines.append(line[len("data:"):].lstrip())
+        continue
+
+    if data_lines:
+        data_lines[-1] += line
 
 if current_event or data_lines:
     events.append((current_event, "\n".join(data_lines)))

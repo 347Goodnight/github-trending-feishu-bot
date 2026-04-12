@@ -245,29 +245,42 @@ def parse_stream_event_data(raw_data):
     return json.loads(raw_data)
 
 
-def parse_coze_stream_response(resp):
-    """Parse Coze streaming chat events and return the assistant reply."""
-    delta_chunks = []
-    completed_answer = ""
-    last_chat_error = None
+def iter_sse_events(resp):
+    """Yield SSE events as (event_name, joined_data)."""
     current_event = None
+    data_lines = []
 
     for raw_line in resp.iter_lines(decode_unicode=True):
         if raw_line is None:
             continue
 
-        line = raw_line.strip()
+        line = raw_line.rstrip("\r")
         if not line:
+            if current_event or data_lines:
+                yield current_event, "\n".join(data_lines)
+            current_event = None
+            data_lines = []
             continue
 
         if line.startswith("event:"):
             current_event = line[len("event:"):].strip()
             continue
 
-        if not line.startswith("data:"):
-            continue
+        if line.startswith("data:"):
+            data_lines.append(line[len("data:"):].lstrip())
 
-        payload = parse_stream_event_data(line[len("data:"):])
+    if current_event or data_lines:
+        yield current_event, "\n".join(data_lines)
+
+
+def parse_coze_stream_response(resp):
+    """Parse Coze streaming chat events and return the assistant reply."""
+    delta_chunks = []
+    completed_answer = ""
+    last_chat_error = None
+
+    for current_event, raw_data in iter_sse_events(resp):
+        payload = parse_stream_event_data(raw_data)
         if payload is None:
             continue
 

@@ -44,6 +44,22 @@ class ParseCozeStreamResponseTests(unittest.TestCase):
 
         self.assertEqual(parse_coze_stream_response(resp), "hello world")
 
+    def test_handles_multiline_sse_data(self):
+        lines = [
+            "event:conversation.message.completed",
+            'data:{"role":"assistant","type":"answer",',
+            'data:"content":"hello world"}',
+            "",
+            "event:done",
+            'data:"[DONE]"',
+        ]
+        resp = SimpleNamespace(
+            iter_lines=lambda decode_unicode=True: iter(lines),
+            text="\n".join(lines),
+        )
+
+        self.assertEqual(parse_coze_stream_response(resp), "hello world")
+
 
 if __name__ == "__main__":
     unittest.main()

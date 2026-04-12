@@ -77,17 +77,23 @@ if resp.status_code != 200:
     raise SystemExit(1)
 
 print("\n  Step 2: read stream events")
-current_event = None
 answer_chunks = []
 completed_answer = ""
 chat_failed = None
 
+current_event = None
+data_lines = []
+events = []
 for raw_line in resp.iter_lines(decode_unicode=True):
     if raw_line is None:
         continue
 
-    line = raw_line.strip()
+    line = raw_line.rstrip("\r")
     if not line:
+        if current_event or data_lines:
+            events.append((current_event, "\n".join(data_lines)))
+        current_event = None
+        data_lines = []
         continue
 
     print(f"  STREAM {line[:300]}")
@@ -96,10 +102,13 @@ for raw_line in resp.iter_lines(decode_unicode=True):
         current_event = line[len("event:"):].strip()
         continue
 
-    if not line.startswith("data:"):
-        continue
+    if line.startswith("data:"):
+        data_lines.append(line[len("data:"):].lstrip())
 
-    payload_text = line[len("data:"):].strip()
+if current_event or data_lines:
+    events.append((current_event, "\n".join(data_lines)))
+
+for current_event, payload_text in events:
     if not payload_text or payload_text == '"[DONE]"':
         continue
 

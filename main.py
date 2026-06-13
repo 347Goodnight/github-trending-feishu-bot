@@ -129,8 +129,8 @@ def main():
     trending_list, source_name = get_trending()
 
     if not trending_list:
-        logger.error("\u274c 无法获取 GitHub Trending 数据")
-        return
+        logger.error("❌ 无法获取 GitHub Trending 数据")
+        raise SystemExit(1)
 
     logger.info(f"\u2705 成功获取 {len(trending_list)} 条数据（来源: {source_name}）")
 

@@ -18,4 +18,4 @@ jobs:
       - name: Run bot
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-        run: python main.py
+        run: python main.py 2>&1

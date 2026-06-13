@@ -20,21 +20,36 @@ def build_card(trending_list, source_name):
     today_str = datetime.now().strftime("%Y-%m-%d")
     medals = ["\U0001f947", "\U0001f948", "\U0001f949", "\U0001f3c5", "\U0001f3c5", "\U0001f3c5", "\U0001f3c5", "\U0001f3c5", "\U0001f3c5", "\U0001f3c5"]
 
+    top10 = trending_list[:10]
+
     total_today = 0
     languages = {}
-    for item in trending_list[:10]:
+    for item in top10:
         today = item.get("stars_today", 0)
         if isinstance(today, (int, float)):
-            total_today += today
+            total_today += int(today)
         lang = item.get("language", "Unknown") or "Unknown"
         languages[lang] = languages.get(lang, 0) + 1
 
     top_lang = max(languages, key=languages.get) if languages else "N/A"
     top_lang_count = languages[top_lang] if languages else 0
+    top_desc_keywords = set()
+    for item in top10:
+        desc = (item.get("description") or "").lower()
+        if "ai" in desc or "agent" in desc or "claude" in desc or "copilot" in desc:
+            top_desc_keywords.add("AI")
+        if "learn" in desc or "tutorial" in desc or "guide" in desc:
+            top_desc_keywords.add("入门教程")
+        if "free" in desc or "open" in desc:
+            top_desc_keywords.add("免费资源")
+        if "tool" in desc or "plugin" in desc or "extension" in desc:
+            top_desc_keywords.add("插件/工具")
 
+    trend_extra = "、".join(sorted(top_desc_keywords)) if top_desc_keywords else "多元化"
     trend_text = (
-        f"今日 TOP 10 共获得 **{total_today:,}** 颗新增星标，"
-        f"**{top_lang}** 语言最受欢迎（{top_lang_count} 个项目）。"
+        f"今日GitHub趋势中，{trend_extra}类项目成为关注焦点。"
+        f"TOP 10 共获得 **{total_today:,}** 颗新增星标，"
+        f"**{top_lang}** 语言最受欢迎（{top_lang_count}个项目）。"
     )
 
     elements = [
@@ -50,29 +65,28 @@ def build_card(trending_list, source_name):
         {"tag": "markdown", "content": "**TOP 10 热门项目**"},
     ]
 
-    for i, item in enumerate(trending_list[:10], 1):
+    for i, item in enumerate(top10, 1):
         medal = medals[i - 1]
         name = item.get("name", "?")
         lang = item.get("language", "N/A") or "N/A"
-        stars_today = item.get("stars_today", "?")
-        stars = item.get("stars", "?")
-        forks = item.get("forks", "?")
-        desc = (item.get("description", "") or "暂无描述")[:120]
+        stars_today_raw = item.get("stars_today", 0)
+        stars_raw = item.get("stars", 0)
+        forks_raw = item.get("forks", 0)
+        desc = (item.get("description", "") or "暂无描述")[:150]
         url = item.get("url", f"https://github.com/{name}")
 
-        if isinstance(stars_today, int):
-            stars_today = f"{stars_today:,}"
-        if isinstance(stars, int):
-            stars = f"{stars:,}"
-        if isinstance(forks, int):
-            forks = f"{forks:,}"
+        def fmt(n):
+            if isinstance(n, int):
+                return f"{n:,}"
+            return str(n)
 
         elements.append({
             "tag": "markdown",
             "content": (
-                f"{medal} **{i}. [{name}]({url})** \u00b7 {lang}\n"
-                f"\U0001f4c8 今日新增 {stars_today} \u00b7 \u2b50 总 {stars} \u00b7 \U0001f374 {forks}\n"
-                f"简介：{desc}"
+                f"{medal} **{i}. [{name}]({url})** · {lang}\n"
+                f"\U0001f4c8 今日新增 {fmt(stars_today_raw)} · \u2b50 总 {fmt(stars_raw)} · \U0001f374 {fmt(forks_raw)}\n"
+                f"简介：{desc}\n"
+                f"链接：{url}"
             ),
         })
 

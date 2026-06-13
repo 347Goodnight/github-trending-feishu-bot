@@ -17,5 +17,5 @@ jobs:
         run: pip install requests beautifulsoup4 lxml
       - name: Run bot
         env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK }}
         run: python main.py 2>&1

@@ -56,7 +56,6 @@ def build_card(trending_list, source_name):
         {
             "tag": "markdown",
             "content": (
-                f"**\U0001f525 GitHub 每日热门项目 - {today_str}**\n"
                 f"来源：{source_name}\n\n"
                 f"**今日趋势分析：**\n{trend_text}\n"
             ),
@@ -89,12 +88,6 @@ def build_card(trending_list, source_name):
                 f"链接：{url}"
             ),
         })
-
-    elements.append({"tag": "hr"})
-    elements.append({
-        "tag": "markdown",
-        "content": "\u0001f916 由 GitHub Trending Bot 自动生成",
-    })
 
     return {
         "msg_type": "interactive",
